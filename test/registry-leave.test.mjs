@@ -23,11 +23,11 @@ test('leave-behind defaults to archive', () => {
 })
 
 test('profileHasBundle reads official bundle list', () => {
-  assert.equal(profileHasBundle({ dsh: { profile: { bundles: ['dsh-agent-registry'] } } }, 'dsh-agent-registry'), true)
-  assert.equal(profileHasBundle({ dsh: { profile: { bundles: [] } } }, 'dsh-agent-registry'), false)
-  assert.equal(profileHasBundle(null, 'dsh-agent-registry'), false)
+  assert.equal(profileHasBundle({ dsh: { profile: { bundles: ['dsh-claw-registry'] } } }, 'dsh-claw-registry'), true)
+  assert.equal(profileHasBundle({ dsh: { profile: { bundles: [] } } }, 'dsh-claw-registry'), false)
+  assert.equal(profileHasBundle(null, 'dsh-claw-registry'), false)
   assert.equal(shouldApplyLeaveBehind(null), false)
-  assert.equal(shouldApplyLeaveBehind({ dsh: { profile: { bundles: ['dsh-agent-registry'] } } }), false)
+  assert.equal(shouldApplyLeaveBehind({ dsh: { profile: { bundles: ['dsh-claw-registry'] } } }), false)
   assert.equal(shouldApplyLeaveBehind({ dsh: { profile: { bundles: ['dsh-folded-chat'] } } }), true)
 })
 

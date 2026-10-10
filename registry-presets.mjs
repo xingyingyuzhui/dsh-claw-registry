@@ -16,7 +16,7 @@ import {
   normalizePolicy,
   optionAllowed,
   toggleTool,
-} from '../dsh-agent-policy/policy-schema.mjs'
+} from 'dsh-claw-policy/schema'
 
 export {
   AGENT_PRESET_IDS,
@@ -38,9 +38,6 @@ export {
 
 export const SHIPPED_PRESET_IDS = ['standard', 'code', 'minimal', 'cordis']
 export const TEMPLATE_ID = 'wa-template'
-export const TEMPLATE_NAME = 'claw区agent模板'
-export const TEMPLATE_LEGACY_NAMES = ['工作区 Agent 模板', '工作区agent模板']
-export const TEMPLATE_SOURCE_CANDIDATES = ['standard', 'code']
 
 export function presetIdForWorkspace(workspaceId) {
   return 'wa-' + String(workspaceId)
@@ -57,132 +54,18 @@ export function isClawPresetId(id) {
   return id.startsWith('wa-')
 }
 
-export function fallbackMissingPreset(id, liveIds, defaultId = 'standard') {
-  if (id == null || id === '') return id
-  const live = liveIds instanceof Set ? liveIds : new Set(liveIds || [])
-  if (live.has(id)) return id
-  if (isClawPresetId(id)) return defaultId || 'standard'
-  return id
-}
-
-export function aliasClawPresetId(id, defaultId = 'standard') {
-  if (!isClawPresetId(id)) return id
-  const fallback = defaultId || 'standard'
-  return isClawPresetId(fallback) ? 'standard' : fallback
-}
-
-export function rewriteTemplatePresetYaml(text, name) {
-  const line = 'name: ' + name
-  if (typeof text !== 'string' || text === '') return line + '\n'
-  if (/^name:\s*.+$/m.test(text)) return text.replace(/^name:\s*.+$/m, line)
-  return line + '\n' + text
-}
-
-export function siblingFile(path, name) {
-  const raw = String(path || '')
-  const dir = raw.replace(/[/\\][^/\\]+$/, '')
-  if (!dir || dir === raw) return String(name || '')
-  const sep = raw.includes('\\') ? '\\' : '/'
-  return dir + sep + String(name || '')
-}
-
-export async function ensureTemplateNamed(presets, io) {
-  const list = await presets.list()
-  const template = list.find((row) => row && row.id === TEMPLATE_ID)
-  if (template == null) return { changed: false }
-  if (template.name === TEMPLATE_NAME) return { changed: false }
-  if (template.path == null || io == null || typeof io.readFile !== 'function') {
-    return { changed: false }
-  }
-  const file = siblingFile(template.path, 'preset.yml')
-  const text = await io.readFile(file, 'utf8')
-  const next = rewriteTemplatePresetYaml(text, TEMPLATE_NAME)
-  if (next === text) return { changed: false }
-  await io.writeFile(file, next)
-  return { changed: true, file }
-}
-
-export function openPersonaYaml(text) {
-  if (typeof text !== 'string' || text === '') return text
-  return text.replace(/^(\s*)complete:\s*true\s*$/m, '$1complete: false')
-}
-
-export async function ensureOpenPersona(presets, io) {
-  if (presets == null || typeof presets.list !== 'function' || io == null) return { changed: 0 }
-  const list = await presets.list()
-  let changed = 0
-  for (const row of list) {
-    if (!row || !isClawPresetId(row.id) || !row.path) continue
-    try {
-      const text = await io.readFile(row.path, 'utf8')
-      const next = openPersonaYaml(text)
-      if (next !== text) {
-        await io.writeFile(row.path, next)
-        changed += 1
-      }
-    } catch { /* missing composition */ }
-  }
-  return { changed }
-}
-
-export async function clearClawDefault(settings, defaultId) {
-  if (!isClawPresetId(defaultId)) return { cleared: false }
+/**
+ * Unset volatile selectedDefault when it points at a Claw wa-* / template preset.
+ * Namespace is agent-preset-registry (0.2+); path is selectedDefault only.
+ */
+export async function clearSelectedClawDefault(settings, selectedDefault, expectedRevision) {
+  if (!isClawPresetId(selectedDefault)) return { cleared: false }
   if (settings == null || typeof settings.mutate !== 'function') {
     return { cleared: false, skipped: true }
   }
-  await settings.mutate('agent-presets', [{ op: 'unset', path: ['default'] }])
+  const args = expectedRevision === undefined
+    ? ['agent-preset-registry', [{ op: 'unset', path: ['selectedDefault'] }]]
+    : ['agent-preset-registry', [{ op: 'unset', path: ['selectedDefault'] }], expectedRevision]
+  await settings.mutate(...args)
   return { cleared: true }
-}
-
-export function isIsolatedMinimalClone(text) {
-  const src = String(text || '')
-  return src.includes('dsh-tool-bash-persistent') || src.includes('dsh-tool-str-replace-editor')
-}
-
-export async function rewriteIsolatedMinimalClones(presets, io) {
-  if (presets == null || typeof presets.list !== 'function' || io == null) return { repaired: [] }
-  const list = await presets.list()
-  const source = list.find((row) => row && TEMPLATE_SOURCE_CANDIDATES.includes(row.id) && row.path)
-  if (!source) return { repaired: [] }
-  let body = ''
-  try {
-    body = await io.readFile(source.path, 'utf8')
-  } catch {
-    return { repaired: [] }
-  }
-  if (!body) return { repaired: [] }
-  const repaired = []
-  for (const row of list) {
-    if (!row || !isClawPresetId(row.id) || !row.path) continue
-    let text = ''
-    try {
-      text = await io.readFile(row.path, 'utf8')
-    } catch {
-      continue
-    }
-    if (!isIsolatedMinimalClone(text) || text === body) continue
-    await io.writeFile(row.path, body)
-    repaired.push(row.id)
-  }
-  return { repaired }
-}
-
-export async function ensureGeneratedPreset(presets, spec) {
-  const id = spec.id
-  const name = spec.name
-  if (isShippedPreset(id) || id === TEMPLATE_ID) {
-    throw new Error('refusing to overwrite a shipped or template preset')
-  }
-  const list = await presets.list()
-  const ids = new Set(list.map((row) => row.id))
-  if (!ids.has(TEMPLATE_ID)) {
-    const source = TEMPLATE_SOURCE_CANDIDATES.find((candidate) => ids.has(candidate))
-    if (!source) throw new Error('no official preset to copy as template')
-    await presets.copy(source, TEMPLATE_ID, TEMPLATE_NAME)
-    ids.add(TEMPLATE_ID)
-  }
-  if (!ids.has(id)) {
-    await presets.copy(TEMPLATE_ID, id, name || id)
-  }
-  return id
 }

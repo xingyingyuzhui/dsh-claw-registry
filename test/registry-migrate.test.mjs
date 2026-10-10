@@ -10,6 +10,7 @@ import { apply, _internal } from '../host.js'
 import {
   firstFrameIsHeaderLine,
   migrateClawLegacy,
+  migrateRegistryV1ToV2,
   migrateSessionFile,
   quarantineRoot,
   resolveLogPreset,
@@ -61,7 +62,7 @@ test('rewrite header-only wa-* and append last selected standard', () => {
   const selected = rows.filter((row) => row.type === 'agent-preset/selected')
   assert.equal(selected.length, 1)
   assert.equal(selected[0].data.agentPreset, 'standard')
-  assert.equal(selected[0].data.source, 'dsh-agent-registry-migrate')
+  assert.equal(selected[0].data.source, 'dsh-claw-registry-migrate')
   assert.equal(selected[0].seq, 1)
 })
 
@@ -163,7 +164,11 @@ test('apply migrates leftover presets before registering routes', async () => {
       async list() { return [{ id: 'standard' }] },
       async select(id) { selectCalls.push(id) },
     },
-    webServer: { register() { return () => {} } },
+    connection: {
+      fetch: {
+        register() { return () => {} },
+      },
+    },
     effect() {},
     logger: { info() {}, warn() {} },
   }
@@ -179,3 +184,85 @@ test('apply migrates leftover presets before registering routes', async () => {
     _internal.migrateOnApply = false
   }
 })
+
+test('migrateRegistryV1ToV2 is a no-op when registry is already v2', async () => {
+  const v2Reg = {
+    version: 2,
+    revision: 5,
+    sessionBindings: { 'sess-1': { sessionId: 'sess-1' } },
+    repairQueue: {},
+  }
+  const result = await migrateRegistryV1ToV2('/fake/home', v2Reg, null, [])
+  assert.equal(result.migrated, false)
+  assert.equal(result.registry, v2Reg)
+})
+
+test('migrateRegistryV1ToV2 validates sessions, binds matching, queues invalid, and writes backup', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'dar-mig-v2-'))
+  const regDir = join(home, 'workspace-agents')
+  mkdirSync(regDir, { recursive: true })
+  const regFile = join(regDir, 'registry.json')
+
+  const v1Reg = {
+    version: 1,
+    agents: {
+      'agent-alpha': {
+        agentId: 'agent-alpha',
+        workspaceId: 'ws-alpha',
+        status: 'active',
+        canonicalRoot: join(home, 'DSclaw', 'alpha'),
+        dshPreset: 'standard',
+      },
+    },
+  }
+  writeFileSync(regFile, JSON.stringify(v1Reg, null, 2))
+
+  const workspaces = [
+    {
+      id: 'ws-alpha',
+      sessionIds: ['sess-good', 'sess-wrong-preset', 'sess-missing-meta'],
+    },
+  ]
+
+  const sessionController = {
+    async inspect(sessionId) {
+      if (sessionId === 'sess-good') {
+        return {
+          cwd: join(home, 'DSclaw', 'alpha'),
+          agentPreset: 'standard',
+        }
+      }
+      if (sessionId === 'sess-wrong-preset') {
+        return {
+          cwd: join(home, 'DSclaw', 'alpha'),
+          agentPreset: 'custom-preset',
+        }
+      }
+      throw new Error('session missing')
+    },
+  }
+
+  const result = await migrateRegistryV1ToV2(home, v1Reg, sessionController, workspaces)
+  assert.equal(result.migrated, true)
+  assert.equal(result.boundCount, 1)
+  assert.equal(result.repairCount, 2)
+  assert.equal(result.registry.version, 2)
+
+  // sess-good is bound
+  assert.ok(result.registry.sessionBindings['sess-good'])
+  assert.equal(result.registry.sessionBindings['sess-good'].state, 'ready')
+  assert.equal(result.registry.sessionBindings['sess-good'].source, 'migration')
+
+  // sess-wrong-preset is in repairQueue
+  assert.ok(result.registry.repairQueue['sess-wrong-preset'])
+  assert.equal(result.registry.repairQueue['sess-wrong-preset'].reason, 'missing-preset-evidence')
+
+  // sess-missing-meta is in repairQueue
+  assert.ok(result.registry.repairQueue['sess-missing-meta'])
+  assert.equal(result.registry.repairQueue['sess-missing-meta'].reason, 'inspect-failed')
+
+  // Backup file exists
+  assert.ok(result.backupPath)
+  assert.ok(readFileSync(result.backupPath, 'utf8').includes('agent-alpha'))
+})
+

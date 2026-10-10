@@ -2,7 +2,7 @@
 
 import { realpathSync } from 'node:fs'
 import { join } from 'node:path'
-import { projectAgent, refreshBinding, setAgentModel, setAgentPolicy, setAgentSkills, setStatus } from './registry-store.mjs'
+import { computeClaims, projectAgent, refreshBinding, setAgentModel, setAgentPolicy, setAgentSkills, setStatus } from './registry-store.mjs'
 import { normalizePathKey } from './registry-view.mjs'
 
 export function sameRoot(a, b) {
@@ -57,7 +57,7 @@ export function identityPaths(dshHome, agentId, agent) {
 export function listProjected(registry, workspaces, dshHome) {
   const byId = workspaceIndex(workspaces)
   const rows = Object.values(registry.agents).map((agent) => {
-    const projected = projectAgent(agent, byId.get(String(agent.workspaceId)))
+    const projected = projectAgent(agent, byId.get(String(agent.workspaceId)), registry.sessionBindings)
     if (dshHome) projected.files = identityPaths(dshHome, agent.agentId, projected)
     return projected
   })
@@ -65,9 +65,14 @@ export function listProjected(registry, workspaces, dshHome) {
     if (a.status !== b.status) return a.status === 'active' ? -1 : 1
     return String(a.title || a.canonicalRoot).localeCompare(String(b.title || b.canonicalRoot))
   })
+  const claims = computeClaims(registry, workspaces)
   return {
+    revision: Number(registry.revision) || 1,
     main: { ...registry.main, declared: { preset: 'main', enforced: false } },
     agents: rows,
+    bindings: Object.values(registry.sessionBindings || {}),
+    pending: Object.values(registry.repairQueue || {}),
+    claims,
   }
 }
 
@@ -82,7 +87,7 @@ export function explainAgent(registry, workspaces, query) {
     agent = Object.values(registry.agents).find((row) => row.canonicalRoot === query.path || sameRoot(row.canonicalRoot, query.path)) || null
   }
   if (!agent) return null
-  return projectAgent(agent, byId.get(String(agent.workspaceId)))
+  return projectAgent(agent, byId.get(String(agent.workspaceId)), registry.sessionBindings)
 }
 
 export function archiveAgent(registry, agentId, now) {

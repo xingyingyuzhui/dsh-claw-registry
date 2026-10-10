@@ -66,7 +66,9 @@ function coreSpec(key, daily) {
 }
 
 export function createSettingsPage(React, t, post, toast, subscribeLocale, ReactDOM) {
-  return function RegistryPage() {
+  return function RegistryPage(props) {
+    const refreshKey = props && props.refreshKey
+    const compatMode = Boolean(props && props.compatMode)
     const el = React.createElement
     function svgIcon(className, d) {
       return el('svg', {
@@ -119,7 +121,7 @@ export function createSettingsPage(React, t, post, toast, subscribeLocale, React
     const filePickRef = React.useRef(null)
 
     const load = React.useCallback(() => {
-      return post('/dsh-agent-registry/list', {}).then((next) => {
+      return post('/api/dsh-claw/registry/list', {}).then((next) => {
         setData(next)
         setError('')
       }).catch((err) => {
@@ -127,7 +129,7 @@ export function createSettingsPage(React, t, post, toast, subscribeLocale, React
       })
     }, [])
 
-    React.useEffect(() => { load() }, [load])
+    React.useEffect(() => { load() }, [load, refreshKey])
 
     const choices = selectableAgents(data, { main: t('mainOption'), archived: t('statusArchived') })
     const current = choices.find((row) => row.agentId === selected) || choices[0]
@@ -154,7 +156,7 @@ export function createSettingsPage(React, t, post, toast, subscribeLocale, React
     function saveLeaveBehind(mode) {
       if (mode === leaveBehind) return
       setBusy(true)
-      post('/dsh-agent-registry/leave-behind', { leaveBehind: mode }).then(() => load()).catch((err) => {
+      post('/api/dsh-claw/registry/leave-behind', { leaveBehind: mode }).then(() => load()).catch((err) => {
         toast(String(err.message || t('fail')))
       }).finally(() => setBusy(false))
     }
@@ -231,9 +233,9 @@ export function createSettingsPage(React, t, post, toast, subscribeLocale, React
         setPersonaSaved(blank)
         return
       }
-      fetch('/dsh-agent-identity/read', {
+      fetch('/api/dsh-claw/identity/read', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-DSH-Agent-Identity': '1' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ root }),
         signal: ac && ac.signal,
       }).then((res) => res.json()).then((data) => {
@@ -251,11 +253,10 @@ export function createSettingsPage(React, t, post, toast, subscribeLocale, React
     }, [root])
 
     function reportStale(name) {
-      fetch('/dsh-agent-registry/diag', {
+      fetch('/api/dsh-claw/registry/diag', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-DSH-Agent-Registry': '1',
           'X-DSH-Trace': newTraceId(),
         },
         body: JSON.stringify({ code: CLIENT_CODES.REGISTRY_RESPONSE_STALE, operation: name }),
@@ -285,9 +286,9 @@ export function createSettingsPage(React, t, post, toast, subscribeLocale, React
     function reloadVault(nextRoot, gen, signal) {
       const path = nextRoot || root
       if (!path) return Promise.resolve()
-      return fetch('/dsh-agent-memory/read', {
+      return fetch('/api/dsh-claw/memory/read', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-DSH-Agent-Memory': '1' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ root: path }),
         signal,
       }).then((res) => res.json()).then((data) => applyVault(data, path, gen)).catch(() => {})
@@ -301,20 +302,20 @@ export function createSettingsPage(React, t, post, toast, subscribeLocale, React
       const saveGen = fetchGen.current
       setPersonaBusy(true)
       const request = spec.via === 'daily'
-        ? fetch('/dsh-agent-memory/write', {
+        ? fetch('/api/dsh-claw/memory/write', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-DSH-Agent-Memory': '1' },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ root: saveRoot, action: 'save', target: 'daily', key: spec.dateKey, content }),
         }).then((res) => res.json())
         : spec.via === 'memory'
-        ? fetch('/dsh-agent-memory/write', {
+        ? fetch('/api/dsh-claw/memory/write', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-DSH-Agent-Memory': '1' },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ root: saveRoot, action: 'save', target: spec.vault, content }),
         }).then((res) => res.json())
-        : fetch('/dsh-agent-identity/write', {
+        : fetch('/api/dsh-claw/identity/write', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-DSH-Agent-Identity': '1' },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ root: saveRoot, files: { [spec.file]: content } }),
         }).then((res) => res.json())
       request.then((row) => {
@@ -397,9 +398,9 @@ export function createSettingsPage(React, t, post, toast, subscribeLocale, React
     }
 
     function saveMemSettings(next) {
-      fetch('/dsh-agent-memory/settings', {
+      fetch('/api/dsh-claw/memory/settings', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-DSH-Agent-Memory': '1' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ settings: next }),
       }).then((res) => res.json()).then((data) => {
         if (!data || data.ok !== true) {
@@ -413,9 +414,9 @@ export function createSettingsPage(React, t, post, toast, subscribeLocale, React
 
     function actPending(action, id) {
       if (!root) return
-      fetch('/dsh-agent-memory/write', {
+      fetch('/api/dsh-claw/memory/write', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-DSH-Agent-Memory': '1' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ root, action, id }),
       }).then((res) => res.json()).then((data) => {
         if (!data || data.ok !== true) {
@@ -782,7 +783,7 @@ export function createSettingsPage(React, t, post, toast, subscribeLocale, React
     }, [pickOpen, tab, choices.length])
 
     React.useEffect(() => {
-      post('/dsh-agent-registry/models', {}).then((data) => {
+      post('/api/dsh-claw/registry/models', {}).then((data) => {
         if (data && data.ok === true) {
           setCatalog({ official: data.official || null, groups: Array.isArray(data.groups) ? data.groups : [] })
         }
@@ -802,7 +803,7 @@ export function createSettingsPage(React, t, post, toast, subscribeLocale, React
     function saveModel(selection) {
       if (!current) return
       setModelBusy(true)
-      post('/dsh-agent-registry/model', {
+      post('/api/dsh-claw/registry/model', {
         agentId: current.agentId,
         inherit: selection == null,
         model: selection,
@@ -815,7 +816,7 @@ export function createSettingsPage(React, t, post, toast, subscribeLocale, React
     function savePolicy() {
       if (!current || !policy) return
       setPolicyBusy(true)
-      post('/dsh-agent-registry/policy', { agentId: current.agentId, policy }).then(() => {
+      post('/api/dsh-claw/registry/policy', { agentId: current.agentId, policy }).then(() => {
         toast(t('saved'))
         return load()
       }).catch((err) => toast(String(err.message || t('fail')))).finally(() => setPolicyBusy(false))
@@ -943,7 +944,7 @@ export function createSettingsPage(React, t, post, toast, subscribeLocale, React
     function saveSkills(nextDeny) {
       if (!current) return
       setSkillBusy(true)
-      post('/dsh-agent-registry/skills', { agentId: current.agentId, deny: nextDeny }).then(() => {
+      post('/api/dsh-claw/registry/skills', { agentId: current.agentId, deny: nextDeny }).then(() => {
         setSkillDeny(nextDeny)
         return load()
       }).catch((err) => toast(String(err.message || t('fail')))).finally(() => setSkillBusy(false))
@@ -1004,7 +1005,7 @@ export function createSettingsPage(React, t, post, toast, subscribeLocale, React
           el('button', { type: 'button', className: 'dar-btn', onClick: copyId, disabled: !current }, t('copyId')),
           el('button', { type: 'button', className: 'dar-btn', onClick: load }, t('refresh')),
           current && !isMain && agent && agent.status === 'archived'
-            ? el('button', { type: 'button', className: 'dar-btn', disabled: busy, onClick() { act('/dsh-agent-registry/restore') } }, t('restore'))
+            ? el('button', { type: 'button', className: 'dar-btn', disabled: busy, onClick() { act('/api/dsh-claw/registry/restore') } }, t('restore'))
             : null,
           current && !isMain && agent && agent.status !== 'archived'
             ? el('button', { type: 'button', className: 'dar-btn dar-danger', disabled: busy, onClick() { closePick(); setConfirm(true) } }, t('archive'))
@@ -1025,7 +1026,7 @@ export function createSettingsPage(React, t, post, toast, subscribeLocale, React
         ),
         el('div', { className: 'dar-card', role: 'tabpanel' },
           !current
-            ? el('p', { className: 'dar-empty' }, t('empty'))
+            ? el('p', { className: 'dar-empty' }, t(compatMode ? 'emptyCompat' : 'empty'))
             : panel,
         ),
       ),
@@ -1039,7 +1040,7 @@ export function createSettingsPage(React, t, post, toast, subscribeLocale, React
               type: 'button',
               className: 'dar-btn dar-danger',
               disabled: busy,
-              onClick() { act('/dsh-agent-registry/archive') },
+              onClick() { act('/api/dsh-claw/registry/archive') },
             }, t('confirm')),
           ),
         ),
@@ -1069,7 +1070,7 @@ export function registerSettings(ctx, React, t, Page, TemplatePage) {
   const stopAgent = slots.inject('settings.section', function () {
     return slots.register({
       name: 'settings.section',
-      id: 'dsh-agent-registry',
+      id: 'dsh-claw-registry',
       order: 19,
       locale: NS,
       label() { return t('nav') },
@@ -1078,7 +1079,7 @@ export function registerSettings(ctx, React, t, Page, TemplatePage) {
   const stopTemplate = slots.inject('settings.section', function () {
     return slots.register({
       name: 'settings.section',
-      id: 'dsh-agent-registry-template',
+      id: 'dsh-claw-registry-template',
       order: 20,
       locale: NS,
       label() { return t('tabTemplate') },

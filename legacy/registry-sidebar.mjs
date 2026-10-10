@@ -8,7 +8,7 @@ import {
   isOfficialSectionLabel,
   normalizeZone,
   sessionStamp,
-} from './registry-view.mjs'
+} from '../registry-view.mjs'
 
 export const CLAW_ATTR = 'data-dar-claw-section'
 export const HIDE_ATTR = 'data-dar-claw-hide'

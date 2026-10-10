@@ -87,7 +87,7 @@ export function createTemplatePage(React, t, post, toast, subscribeLocale, React
     const template = (data && data.template) || { preset: 'research', mcp: 'init-defaults', policy: null, model: null, skills: { deny: [] } }
 
     const load = React.useCallback(() => {
-      return post('/dsh-agent-registry/list', {}).then((next) => {
+      return post('/api/dsh-claw/registry/list', {}).then((next) => {
         setData(next)
         setError('')
         const row = next && next.template
@@ -103,7 +103,7 @@ export function createTemplatePage(React, t, post, toast, subscribeLocale, React
     React.useEffect(() => { load() }, [load])
 
     React.useEffect(() => {
-      post('/dsh-agent-registry/models', {}).then((row) => {
+      post('/api/dsh-claw/registry/models', {}).then((row) => {
         if (row && row.ok === true) setCatalog({ official: row.official || null, groups: Array.isArray(row.groups) ? row.groups : [] })
       }).catch(() => setCatalog({ official: null, groups: [] }))
     }, [tab])
@@ -119,9 +119,9 @@ export function createTemplatePage(React, t, post, toast, subscribeLocale, React
     }, [])
 
     React.useEffect(() => {
-      fetch('/dsh-agent-memory/settings', {
+      fetch('/api/dsh-claw/memory/settings', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-DSH-Agent-Memory': '1' },
+        headers: { 'Content-Type': 'application/json' },
         body: '{}',
       }).then((res) => res.json()).then((row) => {
         if (row && row.ok === true) setVault({ settings: row.settings })
@@ -130,7 +130,7 @@ export function createTemplatePage(React, t, post, toast, subscribeLocale, React
 
     function saveTemplate(patch) {
       setBusy(true)
-      return post('/dsh-agent-registry/template', patch).then((next) => {
+      return post('/api/dsh-claw/registry/template', patch).then((next) => {
         if (next && next.template) {
           setData((prev) => ({ ...(prev || {}), template: next.template }))
           setPolicy(clampClawPolicy(normalizePolicy(next.template.policy || next.template, next.template.preset)))
@@ -143,9 +143,9 @@ export function createTemplatePage(React, t, post, toast, subscribeLocale, React
     }
 
     function saveMemSettings(next) {
-      fetch('/dsh-agent-memory/settings', {
+      fetch('/api/dsh-claw/memory/settings', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-DSH-Agent-Memory': '1' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ settings: next }),
       }).then((res) => res.json()).then((row) => {
         if (!row || row.ok !== true) {

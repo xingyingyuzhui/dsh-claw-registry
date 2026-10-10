@@ -1,4 +1,4 @@
-import { isClawPresetId, isClawWorkspaceFact, isDsClawPath, normalizePathKey, pathSetHas } from './registry-view.mjs'
+import { isClawPresetId, isClawWorkspaceFact, isDsClawPath, normalizePathKey, pathSetHas } from '../registry-view.mjs'
 
 export function shouldShowClawRoster() {
   return false

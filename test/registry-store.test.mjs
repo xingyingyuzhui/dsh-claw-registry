@@ -3,29 +3,19 @@ import { mkdir, mkdtemp, readFile, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { agentIdForWorkspace, emptyRegistry, ensureBinding, loadRegistry, saveRegistry, setAgentModel, setAgentPolicy, setAgentSkills } from '../registry-store.mjs'
+import { agentIdForWorkspace, bindSession, emptyRegistry, ensureBinding, loadRegistry, saveRegistry, setAgentModel, setAgentPolicy, setAgentSkills } from '../registry-store.mjs'
 import {
-  clearClawDefault,
+  clearSelectedClawDefault,
   applyPreset,
   declaredOf,
-  ensureGeneratedPreset,
-  isIsolatedMinimalClone,
-  rewriteIsolatedMinimalClones,
   isToolEnabled,
   toggleTool,
-  ensureTemplateNamed,
-  openPersonaYaml,
   INIT_PRESET,
-  aliasClawPresetId,
-  fallbackMissingPreset,
   isClawPresetId,
   presetIdForWorkspace,
-  rewriteTemplatePresetYaml,
-  siblingFile,
-  TEMPLATE_NAME,
 } from '../registry-presets.mjs'
 import { archiveAgent, explainAgent, listProjected, renameAgent, restoreAgent, sameRoot, syncBindings } from '../registry-logic.mjs'
-import { CLAW_SESSION_ATTR, PRESET_HIDE_ATTR, WORKSPACE_HIDE_ATTR, hideClawPresetSurfaces, hideClawSessionSeat, inProtectedChrome, isAccessSeatButton, isAccessMenuItem, isPresetSeatButton, isWorkspaceSeatButton } from '../registry-preset-hide.mjs'
+import { CLAW_SESSION_ATTR, PRESET_HIDE_ATTR, WORKSPACE_HIDE_ATTR, hideClawPresetSurfaces, hideClawSessionSeat, inProtectedChrome, isAccessSeatButton, isAccessMenuItem, isPresetSeatButton, isWorkspaceSeatButton } from '../legacy/registry-preset-hide.mjs'
 import { bindCreatedAgent, isClawHomePath, isStockAgentsSeed, purgeLegacyAgents, refreshSeedFiles, reserveClawWorkspace, rewriteIdentityHeading, seedFiles, seedNeedsRefresh, slugFromName } from '../registry-claw.mjs'
 import {
   agentForSession,
@@ -47,7 +37,7 @@ import {
   sessionStamp,
   shouldHideOfficialGroup,
 } from '../registry-view.mjs'
-import { applyClawHeaderActions, applyClawSearchInput, applyOfficialSearchHide, applyZoneVisibility, CLAW_ACTIONS_ATTR, CLAW_ATTR, findHeaderActions, findOfficialSearchInput, hideOfficialClawGroups, officialRowFact, readOfficialSearchQuery, SEARCH_HIDE_ATTR, TREE_HIDE_ATTR, ZONE_HIDE_ATTR } from '../registry-sidebar.mjs'
+import { applyClawHeaderActions, applyClawSearchInput, applyOfficialSearchHide, applyZoneVisibility, CLAW_ACTIONS_ATTR, CLAW_ATTR, findHeaderActions, findOfficialSearchInput, hideOfficialClawGroups, officialRowFact, readOfficialSearchQuery, SEARCH_HIDE_ATTR, TREE_HIDE_ATTR, ZONE_HIDE_ATTR } from '../legacy/registry-sidebar.mjs'
 import {
   filterOfficialPresetRoster,
   isolateWorkspaceSnapshot,
@@ -56,7 +46,7 @@ import {
   wrapPresetList,
   wrapWorkspaceList,
   itemOwnsCurrentSession,
-} from '../registry-isolate.mjs'
+} from '../legacy/registry-isolate.mjs'
 
 test('agent ids are stable per workspace id', () => {
   assert.equal(agentIdForWorkspace('abc'), 'wa_abc')
@@ -78,93 +68,16 @@ test('claw preset ids are the template and wa-* copies only', () => {
   assert.equal(isClawPresetId('my-agent'), false)
 })
 
-test('openPersonaYaml turns complete persona off', () => {
-  const src = '    text: hi\n    complete: true\n    includeRuntimeContext: false\n'
-  assert.match(openPersonaYaml(src), /complete: false/)
-})
-
-test('rewriteTemplatePresetYaml replaces the name field', () => {
-  assert.equal(
-    rewriteTemplatePresetYaml('name: 工作区 Agent 模板\ndescription: x\n', TEMPLATE_NAME),
-    'name: claw区agent模板\ndescription: x\n',
-  )
-})
-
-test('siblingFile keeps the original slash style', () => {
-  assert.equal(siblingFile('/tmp/wa-template/agent.cordis.yml', 'preset.yml'), '/tmp/wa-template/preset.yml')
-  assert.equal(siblingFile('C:\\Users\\qin\\.dsh\\.agent-presets\\wa-template\\agent.cordis.yml', 'preset.yml'), 'C:\\Users\\qin\\.dsh\\.agent-presets\\wa-template\\preset.yml')
-})
-
-test('ensureTemplateNamed rewrites an old template display name', async () => {
-  const files = { '/tmp/wa-template/preset.yml': 'name: 工作区 Agent 模板\n' }
-  const result = await ensureTemplateNamed({
-    async list() {
-      return [{ id: 'wa-template', name: '工作区 Agent 模板', path: '/tmp/wa-template/agent.cordis.yml' }]
-    },
-  }, {
-    async readFile(file) { return files[file] },
-    async writeFile(file, text) { files[file] = text },
-  })
-  assert.equal(result.changed, true)
-  assert.match(files['/tmp/wa-template/preset.yml'], /claw区agent模板/)
-})
-
-test('clearClawDefault unsets only claw roster ids', async () => {
+test('clearSelectedClawDefault unsets agent-preset-registry selectedDefault', async () => {
   const ops = []
-  const settings = { async mutate(ns, list) { ops.push({ ns, list }) } }
-  assert.equal((await clearClawDefault(settings, 'standard')).cleared, false)
-  assert.equal((await clearClawDefault(settings, 'wa-ws-a')).cleared, true)
-  assert.deepEqual(ops, [{ ns: 'agent-presets', list: [{ op: 'unset', path: ['default'] }] }])
-})
-
-test('ensureGeneratedPreset copies template then workspace preset', async () => {
-  const copies = []
-  const presets = {
-    async list() {
-      return copies.length === 0
-        ? [{ id: 'minimal' }, { id: 'standard' }]
-        : [{ id: 'minimal' }, { id: 'standard' }, ...copies.map((row) => ({ id: row.id }))]
-    },
-    async copy(from, id, name) { copies.push({ from, id, name }) },
-  }
-  await ensureGeneratedPreset(presets, { id: 'wa-ws1', name: 'One' })
-  await ensureGeneratedPreset(presets, { id: 'wa-ws1', name: 'One' })
-  assert.deepEqual(copies, [
-    { from: 'standard', id: 'wa-template', name: TEMPLATE_NAME },
-    { from: 'wa-template', id: 'wa-ws1', name: 'One' },
+  const settings = { async mutate(ns, list, rev) { ops.push({ ns, list, rev }) } }
+  assert.equal((await clearSelectedClawDefault(settings, 'standard')).cleared, false)
+  assert.equal((await clearSelectedClawDefault(settings, 'wa-ws-a', 3)).cleared, true)
+  assert.equal((await clearSelectedClawDefault(settings, 'wa-ws-b')).cleared, true)
+  assert.deepEqual(ops, [
+    { ns: 'agent-preset-registry', list: [{ op: 'unset', path: ['selectedDefault'] }], rev: 3 },
+    { ns: 'agent-preset-registry', list: [{ op: 'unset', path: ['selectedDefault'] }], rev: undefined },
   ])
-})
-
-test('isolated minimal clones are rewritten from the official standard file', async () => {
-  assert.equal(isIsolatedMinimalClone("name: '@deepseek-ai/dsh-tool-bash-persistent'"), true)
-  assert.equal(isIsolatedMinimalClone('You are a coding agent'), false)
-  const files = {
-    '/tmp/standard/agent.cordis.yml': 'name: @deepseek-ai/dsh-tool-bash\n',
-    '/tmp/wa-template/agent.cordis.yml': "name: '@deepseek-ai/dsh-tool-str-replace-editor'\n",
-    '/tmp/wa-test1/agent.cordis.yml': "name: '@deepseek-ai/dsh-tool-bash-persistent'\n",
-  }
-  const presets = {
-    async list() {
-      return [
-        { id: 'standard', path: '/tmp/standard/agent.cordis.yml' },
-        { id: 'wa-template', path: '/tmp/wa-template/agent.cordis.yml' },
-        { id: 'wa-test1', path: '/tmp/wa-test1/agent.cordis.yml' },
-      ]
-    },
-  }
-  const result = await rewriteIsolatedMinimalClones(presets, {
-    async readFile(file) { return files[file] },
-    async writeFile(file, text) { files[file] = text },
-  })
-  assert.deepEqual(result.repaired, ['wa-template', 'wa-test1'])
-  assert.equal(files['/tmp/wa-test1/agent.cordis.yml'], files['/tmp/standard/agent.cordis.yml'])
-})
-
-test('ensureGeneratedPreset refuses shipped ids', async () => {
-  await assert.rejects(
-    () => ensureGeneratedPreset({ list: async () => [], copy: async () => {} }, { id: 'standard' }),
-    /refusing/,
-  )
 })
 
 test('ensureBinding reuses the same agent and keeps id when title changes', () => {
@@ -269,12 +182,21 @@ test('syncBindings refreshes existing claw agents and does not invent new ones',
   const twice = syncBindings(once.registry, workspaces, 't2')
   assert.equal(once.created.length, 0)
   assert.equal(once.changed, true)
-  assert.equal(twice.changed, false)
-  const listed = listProjected(twice.registry, workspaces)
-  assert.equal(listed.agents[0].title, 'One')
-  assert.equal(listed.agents[0].sessionCount, 1)
-  assert.deepEqual(listed.agents[0].sessionIds, ['s1'])
-  assert.equal(listed.agents[0].declared.enforced, false)
+  const listedUnbound = listProjected(twice.registry, workspaces)
+  assert.equal(listedUnbound.agents[0].title, 'One')
+  assert.equal(listedUnbound.agents[0].sessionCount, 0)
+  assert.deepEqual(listedUnbound.agents[0].sessionIds, [])
+  assert.equal(listedUnbound.agents[0].declared.enforced, false)
+
+  const withBound = bindSession(twice.registry, {
+    sessionId: 's1',
+    agentId: bound.agent.agentId,
+    workspaceId: 'ws',
+    presetId: 'wa-one',
+  })
+  const listedBound = listProjected(withBound.registry, workspaces)
+  assert.equal(listedBound.agents[0].sessionCount, 1)
+  assert.deepEqual(listedBound.agents[0].sessionIds, ['s1'])
 })
 
 test('explainAgent finds by workspace id and path', () => {
@@ -443,21 +365,6 @@ test('session stamps match official workspace calendar labels', () => {
   assert.equal(sessionStamp(new Date(2026, 7, 12, 9, 0).getTime(), now, t), '8月12日')
   assert.equal(sessionStamp(new Date(2025, 11, 1, 9, 0).getTime(), now, t), '2025年12月1日')
   assert.equal(sessionStamp(0, now, t), '')
-})
-
-test('missing claw presets fall back to standard; live and shipped ids stay', () => {
-  const live = new Set(['standard', 'code', 'minimal', 'cordis', 'wa-template', 'wa-test1'])
-  assert.equal(fallbackMissingPreset('wa-2e263a19-08cd-4274-b2af-42286f96b517', live), 'standard')
-  assert.equal(fallbackMissingPreset('wa-test1', live), 'wa-test1')
-  assert.equal(fallbackMissingPreset('wa-template', live), 'wa-template')
-  assert.equal(fallbackMissingPreset('standard', live), 'standard')
-  assert.equal(fallbackMissingPreset('nope', live), 'nope')
-  assert.equal(fallbackMissingPreset('', live), '')
-  assert.equal(fallbackMissingPreset(undefined, live), undefined)
-  assert.equal(fallbackMissingPreset('wa-gone', live, 'minimal'), 'minimal')
-  assert.equal(aliasClawPresetId('wa-test2'), 'standard')
-  assert.equal(aliasClawPresetId('standard'), 'standard')
-  assert.equal(aliasClawPresetId('wa-template', 'wa-template'), 'standard')
 })
 
 test('nextPresetBind never asks the client to select a preset', () => {
