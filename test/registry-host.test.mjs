@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict'
-import { EventEmitter } from 'node:events'
-import { mkdtemp } from 'node:fs/promises'
+import { mkdir, mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -8,72 +7,80 @@ import { apply, inject, name, _internal } from '../host.js'
 
 _internal.migrateOnApply = false
 
-function postReq() {
-  const req = new EventEmitter()
-  req.method = 'POST'
-  req.headers = { 'x-dsh-agent-registry': '1' }
-  queueMicrotask(() => req.emit('end'))
-  return req
+function fakeConnection() {
+  const routes = []
+  return {
+    routes,
+    connection: {
+      fetch: {
+        register(entry) {
+          routes.push(entry)
+          return () => { entry.disposed = true }
+        },
+      },
+    },
+  }
 }
 
+const EXPECTED_PATHS = [
+  '/api/dsh-claw/registry/list',
+  '/api/dsh-claw/registry/explain',
+  '/api/dsh-claw/registry/archive',
+  '/api/dsh-claw/registry/rename',
+  '/api/dsh-claw/registry/create',
+  '/api/dsh-claw/registry/diag',
+  '/api/dsh-claw/registry/policy',
+  '/api/dsh-claw/registry/skills',
+  '/api/dsh-claw/registry/models',
+  '/api/dsh-claw/registry/model',
+  '/api/dsh-claw/registry/leave-behind',
+  '/api/dsh-claw/registry/template',
+  '/api/dsh-claw/registry/restore',
+  '/api/dsh-claw/registry/session/bind',
+  '/api/dsh-claw/registry/session/state',
+  '/api/dsh-claw/registry/session/adopt',
+]
+
 test('host named exports', () => {
-  assert.equal(name, 'dsh-agent-registry')
-  assert.deepEqual(inject, ['webServer', 'workspaceRegistry', 'agentPresets', 'settings'])
+  assert.equal(name, 'dsh-claw-registry')
+  assert.deepEqual(inject, ['connection', 'workspaceRegistry', 'agentPresets', 'settings', 'sessionController'])
 })
 
-test('apply registers POST routes and disposes them', async () => {
+test('apply registers Connection Fetch routes and disposes them', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'dar-home-'))
   _internal.setDshHome(dir)
-  const disposed = []
-  const routes = []
+  const effects = []
+  const { connection, routes } = fakeConnection()
   const ctx = {
     workspaceRegistry: { list() { return [] } },
     agentPresets: { list: async () => [], copy: async () => {}, authorable: true },
-    webServer: {
-      register(entry) {
-        routes.push(entry)
-        return () => disposed.push(entry.path)
-      },
-    },
+    connection,
     effect(factory) {
-      const stop = factory()
-      ctx._stop = stop
+      effects.push(factory)
     },
   }
   apply(ctx)
-  assert.equal(routes.length, 13)
-  assert.ok(routes.every((row) => row.kind === 'exact'))
-  assert.deepEqual(routes.map((row) => row.path), [
-    '/dsh-agent-registry/list',
-    '/dsh-agent-registry/explain',
-    '/dsh-agent-registry/archive',
-    '/dsh-agent-registry/rename',
-    '/dsh-agent-registry/create',
-    '/dsh-agent-registry/diag',
-    '/dsh-agent-registry/policy',
-    '/dsh-agent-registry/skills',
-    '/dsh-agent-registry/models',
-    '/dsh-agent-registry/model',
-    '/dsh-agent-registry/leave-behind',
-    '/dsh-agent-registry/template',
-    '/dsh-agent-registry/restore',
-  ])
-  ctx._stop()
-  assert.equal(disposed.length, 13)
+  assert.equal(routes.length, 16)
+  assert.deepEqual(routes.map((row) => row.path), EXPECTED_PATHS)
+  for (const row of routes) {
+    assert.deepEqual(row.methods, ['POST'])
+    assert.equal(row.requestBody, 'buffered')
+    assert.equal(typeof row.fetch, 'function')
+  }
+  // registerJsonRoute owns dispose (13 routes) + leave-behind cleanup effect
+  assert.ok(effects.length >= 13)
+  for (const factory of effects) {
+    const dispose = factory()
+    if (typeof dispose === 'function') dispose()
+  }
+  assert.ok(routes.every((row) => row.disposed === true))
 })
 
 test('list handler does not bind ordinary workspaces', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'dar-home-'))
   _internal.setDshHome(dir)
   const copies = []
-  let body = ''
-  let status = 0
-  const res = {
-    writeHead(code) { status = code },
-    end(text) { body = text },
-  }
-  const req = postReq()
-  const routes = []
+  const { connection, routes } = fakeConnection()
   const ctx = {
     workspaceRegistry: {
       list() {
@@ -89,20 +96,18 @@ test('list handler does not bind ordinary workspaces', async () => {
     settings: {
       async mutate(ns, ops) { ctx._ops.push({ ns, ops }) },
     },
-    webServer: {
-      register(entry) {
-        routes.push(entry)
-        return () => {}
-      },
-    },
+    connection,
     effect() {},
   }
   ctx._ops = []
   apply(ctx)
-  const list = routes.find((row) => row.path.endsWith('/list'))
-  await list.handler(req, res)
-  assert.equal(status, 200)
-  const payload = JSON.parse(body)
+  const list = routes.find((row) => row.path === '/api/dsh-claw/registry/list')
+  const res = await list.fetch(new Request('dsh-app://host/api/dsh-claw/registry/list', {
+    method: 'POST',
+    body: '{}',
+  }))
+  assert.equal(res.status, 200)
+  const payload = await res.json()
   assert.equal(payload.ok, true)
   assert.equal(payload.agents.length, 0)
   assert.equal(copies.length, 0)
@@ -116,6 +121,7 @@ test('host does not wrap agentPresets composition APIs', async () => {
   const mount = async () => ({})
   const recompose = async () => ({})
   const standingKeyFor = async (id) => ({ agentPreset: id })
+  const { connection } = fakeConnection()
   const ctx = {
     workspaceRegistry: { list() { return [] } },
     agentPresets: {
@@ -128,7 +134,7 @@ test('host does not wrap agentPresets composition APIs', async () => {
       standingKeyFor,
       async copy() {},
     },
-    webServer: { register() { return () => {} } },
+    connection,
     effect(factory) { ctx._stop = factory() },
   }
   apply(ctx)
@@ -136,7 +142,7 @@ test('host does not wrap agentPresets composition APIs', async () => {
   assert.equal(ctx.agentPresets.mount, mount)
   assert.equal(ctx.agentPresets.recompose, recompose)
   assert.equal(ctx.agentPresets.standingKeyFor, standingKeyFor)
-  ctx._stop()
+  if (typeof ctx._stop === 'function') ctx._stop()
 })
 
 test('create skips a non-empty orphan directory instead of overwriting it', async () => {
@@ -146,13 +152,7 @@ test('create skips a non-empty orphan directory instead of overwriting it', asyn
   const orphan = join(dir, 'DSclaw', 'demo')
   await mkdir(orphan, { recursive: true })
   await writeFile(join(orphan, 'SOUL.md'), 'keep custom soul\n')
-  let body = ''
-  let status = 0
-  const res = {
-    writeHead(code) { status = code },
-    end(text) { body = text },
-  }
-  const routes = []
+  const { connection, routes } = fakeConnection()
   const ctx = {
     workspaceRegistry: {
       list() { return [] },
@@ -162,27 +162,149 @@ test('create skips a non-empty orphan directory instead of overwriting it', asyn
     },
     agentPresets: { authorable: true, async list() { return [] }, async copy() {} },
     settings: { async mutate() {} },
-    webServer: {
-      register(entry) {
-        routes.push(entry)
-        return () => {}
-      },
-    },
+    connection,
     effect() {},
   }
   apply(ctx)
-  const handler = routes.find((row) => row.path.endsWith('/create')).handler
-  const req = new EventEmitter()
-  req.method = 'POST'
-  req.headers = { 'x-dsh-agent-registry': '1' }
-  queueMicrotask(() => {
-    req.emit('data', Buffer.from(JSON.stringify({ name: 'Demo' })))
-    req.emit('end')
-  })
-  await handler(req, res)
-  assert.equal(status, 200)
-  const payload = JSON.parse(body)
+  const create = routes.find((row) => row.path === '/api/dsh-claw/registry/create')
+  const res = await create.fetch(new Request('dsh-app://host/api/dsh-claw/registry/create', {
+    method: 'POST',
+    body: JSON.stringify({ name: 'Demo' }),
+  }))
+  assert.equal(res.status, 200)
+  const payload = await res.json()
   assert.equal(payload.ok, true)
   assert.equal(payload.agent.slug, 'demo-2')
   assert.equal(await readFile(join(orphan, 'SOUL.md'), 'utf8'), 'keep custom soul\n')
 })
+
+test('session bind, state transition, and CAS revision handling', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dar-home-session-'))
+  _internal.setDshHome(dir)
+  const agentRoot = join(dir, 'DSclaw', 'agent-a')
+  await mkdir(agentRoot, { recursive: true })
+
+  const { connection, routes } = fakeConnection()
+  const inspectedSessions = new Map([
+    ['s-1', { cwd: agentRoot, agentPreset: 'wa-agent-a' }],
+    ['s-mismatch', { cwd: '/other/path', agentPreset: 'wa-agent-a' }],
+  ])
+
+  const ctx = {
+    workspaceRegistry: {
+      list() {
+        return [
+          { id: 'ws-a', path: agentRoot, title: 'Agent A', sessionIds: ['s-1'] },
+        ]
+      },
+    },
+    agentPresets: { authorable: true, async list() { return [] }, async copy() {} },
+    settings: { async mutate() {} },
+    sessionController: {
+      async inspect(sessionId) {
+        const meta = inspectedSessions.get(sessionId)
+        if (!meta) throw new Error('not found')
+        return meta
+      },
+    },
+    connection,
+    effect() {},
+  }
+  apply(ctx)
+
+  // Seed an agent in registry
+  const { registryFile, saveRegistry, emptyRegistry } = await import('../registry-store.mjs')
+  const baseReg = emptyRegistry()
+  baseReg.agents['wa_a'] = {
+    agentId: 'wa_a',
+    workspaceId: 'ws-a',
+    canonicalRoot: agentRoot,
+    title: 'Agent A',
+    slug: 'agent-a',
+    dshPreset: 'wa-agent-a',
+    preset: 'research',
+    status: 'active',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  }
+  await saveRegistry(registryFile(dir), baseReg)
+
+  const bindRoute = routes.find((r) => r.path === '/api/dsh-claw/registry/session/bind')
+  const stateRoute = routes.find((r) => r.path === '/api/dsh-claw/registry/session/state')
+
+  // 1. Successful bind with CAS expectedRevision: 1
+  const res1 = await bindRoute.fetch(new Request('dsh-app://host/api/dsh-claw/registry/session/bind', {
+    method: 'POST',
+    body: JSON.stringify({
+      sessionId: 's-1',
+      agentId: 'wa_a',
+      workspaceId: 'ws-a',
+      presetId: 'wa-agent-a',
+      expectedRevision: 1,
+      source: 'create',
+    }),
+  }))
+  assert.equal(res1.status, 200)
+  const data1 = await res1.json()
+  assert.equal(data1.ok, true)
+  assert.equal(data1.revision, 2)
+  assert.equal(data1.binding.sessionId, 's-1')
+  assert.equal(data1.binding.agentId, 'wa_a')
+  assert.equal(data1.binding.state, 'ready')
+
+  // 2. Idempotent rebind
+  const resIdempotent = await bindRoute.fetch(new Request('dsh-app://host/api/dsh-claw/registry/session/bind', {
+    method: 'POST',
+    body: JSON.stringify({
+      sessionId: 's-1',
+      agentId: 'wa_a',
+      workspaceId: 'ws-a',
+      presetId: 'wa-agent-a',
+      source: 'create',
+    }),
+  }))
+  assert.equal(resIdempotent.status, 200)
+  const dataIdempotent = await resIdempotent.json()
+  assert.equal(dataIdempotent.idempotent, true)
+
+  // 3. CAS conflict
+  const resConflict = await bindRoute.fetch(new Request('dsh-app://host/api/dsh-claw/registry/session/bind', {
+    method: 'POST',
+    body: JSON.stringify({
+      sessionId: 's-2',
+      agentId: 'wa_a',
+      workspaceId: 'ws-a',
+      presetId: 'wa-agent-a',
+      expectedRevision: 999,
+    }),
+  }))
+  assert.equal(resConflict.status, 409)
+
+  // 4. Session mismatch on inspect (wrong cwd)
+  const resMismatch = await bindRoute.fetch(new Request('dsh-app://host/api/dsh-claw/registry/session/bind', {
+    method: 'POST',
+    body: JSON.stringify({
+      sessionId: 's-mismatch',
+      agentId: 'wa_a',
+      workspaceId: 'ws-a',
+      presetId: 'wa-agent-a',
+      expectedRevision: 2,
+    }),
+  }))
+  assert.equal(resMismatch.status, 409)
+
+  // 5. State transition to needs_model
+  const resState = await stateRoute.fetch(new Request('dsh-app://host/api/dsh-claw/registry/session/state', {
+    method: 'POST',
+    body: JSON.stringify({
+      sessionId: 's-1',
+      state: 'needs_model',
+      expectedRevision: 2,
+    }),
+  }))
+  assert.equal(resState.status, 200)
+  const dataState = await resState.json()
+  assert.equal(dataState.revision, 3)
+  assert.equal(dataState.binding.state, 'needs_model')
+})
+

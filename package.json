@@ -1,15 +1,22 @@
 {
-  "name": "dsh-agent-registry",
-  "version": "0.1.79",
+  "name": "dsh-claw-registry",
+  "version": "0.3.0-rc.1",
   "description": "Phase 0 workspace-agent registry for DeepSeek Harness: bind, explain, archive. Does not gate tools. 工作区 Agent 登记：绑定 / 解释 / 归档，不拦截工具。",
-  "keywords": ["dsh", "dsh-plugin", "deepseek-harness", "agent", "workspace"],
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "agent",
+    "workspace"
+  ],
   "license": "MIT",
   "type": "module",
   "main": "./host.js",
   "exports": {
     ".": "./host.js",
     "./client": "./client.js",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./presets": "./registry-presets.mjs"
   },
   "files": [
     "host.js",
@@ -28,25 +35,47 @@
     "registry-observe.mjs",
     "registry-settings.mjs",
     "registry-template.mjs",
-    "registry-sidebar.mjs",
-    "registry-preset-hide.mjs",
-    "registry-isolate.mjs",
+    "registry-navigation.mjs",
+    "registry-bindings.mjs",
+    "registry-claw-browser.mjs",
+    "registry-browser-mode.mjs",
+    "registry-session-mark.mjs",
+    "registry-client-apply.mjs",
+    "registry-runtime.mjs",
     "registry-migrate.mjs",
     "registry-leave.mjs",
-    "registry-runtime.mjs",
     "registry-model.mjs",
     "cordis.patch.yml",
     "README.md",
     "LICENSE"
   ],
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "build": "node scripts/build-client.mjs",
     "build:check": "node scripts/build-client.mjs --check",
     "test": "npm run build:check && node --test test/*.test.mjs"
   },
+  "peerDependencies": {
+    "@deepseek-ai/dsh": "^0.2.0-rc.1"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh": {
+      "optional": true
+    }
+  },
   "dsh": {
-    "bundle": { "patch": "./cordis.patch.yml" },
-    "client": { "platform": "web" }
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  },
+  "dependencies": {
+    "dsh-claw-core": "0.3.0-rc.1",
+    "dsh-claw-policy": "0.3.0-rc.1",
+    "dsh-claw-observability": "0.3.0-rc.1"
   }
 }

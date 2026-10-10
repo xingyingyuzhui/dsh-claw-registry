@@ -2,7 +2,7 @@
 
 import { mkdirSync, readdirSync, realpathSync, statSync } from 'node:fs'
 import { basename, dirname, join, relative, resolve } from 'node:path'
-import { escapesHome } from '../dsh-session-permissions/perm-path.mjs'
+import { relativeEscapes } from 'dsh-claw-core/path-containment'
 import {
   isStockAgentsSeed,
   refreshSeedFiles,
@@ -43,7 +43,7 @@ export function isClawHomePath(dshHome, path) {
   const clawRoot = existingRealpath(join(String(dshHome), CLAW_DIR))
   const target = existingRealpath(path)
   const rel = relative(clawRoot, target)
-  return rel !== '' && !escapesHome(rel)
+  return rel !== '' && !relativeEscapes(rel)
 }
 
 export const AGENT_TITLE_MAX = 80

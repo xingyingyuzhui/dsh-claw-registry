@@ -3,8 +3,9 @@ import { mkdir, mkdtemp, readFile, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { agentIdForWorkspace, emptyRegistry, ensureBinding, loadRegistry, saveRegistry, setAgentModel, setAgentPolicy, setAgentSkills } from '../registry-store.mjs'
+import { agentIdForWorkspace, bindSession, emptyRegistry, ensureBinding, loadRegistry, saveRegistry, setAgentModel, setAgentPolicy, setAgentSkills } from '../registry-store.mjs'
 import {
+  clearSelectedClawDefault,
   clearClawDefault,
   applyPreset,
   declaredOf,
@@ -25,7 +26,7 @@ import {
   TEMPLATE_NAME,
 } from '../registry-presets.mjs'
 import { archiveAgent, explainAgent, listProjected, renameAgent, restoreAgent, sameRoot, syncBindings } from '../registry-logic.mjs'
-import { CLAW_SESSION_ATTR, PRESET_HIDE_ATTR, WORKSPACE_HIDE_ATTR, hideClawPresetSurfaces, hideClawSessionSeat, inProtectedChrome, isAccessSeatButton, isAccessMenuItem, isPresetSeatButton, isWorkspaceSeatButton } from '../registry-preset-hide.mjs'
+import { CLAW_SESSION_ATTR, PRESET_HIDE_ATTR, WORKSPACE_HIDE_ATTR, hideClawPresetSurfaces, hideClawSessionSeat, inProtectedChrome, isAccessSeatButton, isAccessMenuItem, isPresetSeatButton, isWorkspaceSeatButton } from '../legacy/registry-preset-hide.mjs'
 import { bindCreatedAgent, isClawHomePath, isStockAgentsSeed, purgeLegacyAgents, refreshSeedFiles, reserveClawWorkspace, rewriteIdentityHeading, seedFiles, seedNeedsRefresh, slugFromName } from '../registry-claw.mjs'
 import {
   agentForSession,
@@ -47,7 +48,7 @@ import {
   sessionStamp,
   shouldHideOfficialGroup,
 } from '../registry-view.mjs'
-import { applyClawHeaderActions, applyClawSearchInput, applyOfficialSearchHide, applyZoneVisibility, CLAW_ACTIONS_ATTR, CLAW_ATTR, findHeaderActions, findOfficialSearchInput, hideOfficialClawGroups, officialRowFact, readOfficialSearchQuery, SEARCH_HIDE_ATTR, TREE_HIDE_ATTR, ZONE_HIDE_ATTR } from '../registry-sidebar.mjs'
+import { applyClawHeaderActions, applyClawSearchInput, applyOfficialSearchHide, applyZoneVisibility, CLAW_ACTIONS_ATTR, CLAW_ATTR, findHeaderActions, findOfficialSearchInput, hideOfficialClawGroups, officialRowFact, readOfficialSearchQuery, SEARCH_HIDE_ATTR, TREE_HIDE_ATTR, ZONE_HIDE_ATTR } from '../legacy/registry-sidebar.mjs'
 import {
   filterOfficialPresetRoster,
   isolateWorkspaceSnapshot,
@@ -56,7 +57,7 @@ import {
   wrapPresetList,
   wrapWorkspaceList,
   itemOwnsCurrentSession,
-} from '../registry-isolate.mjs'
+} from '../legacy/registry-isolate.mjs'
 
 test('agent ids are stable per workspace id', () => {
   assert.equal(agentIdForWorkspace('abc'), 'wa_abc')
@@ -109,12 +110,16 @@ test('ensureTemplateNamed rewrites an old template display name', async () => {
   assert.match(files['/tmp/wa-template/preset.yml'], /claw区agent模板/)
 })
 
-test('clearClawDefault unsets only claw roster ids', async () => {
+test('clearSelectedClawDefault unsets agent-preset-registry selectedDefault', async () => {
   const ops = []
-  const settings = { async mutate(ns, list) { ops.push({ ns, list }) } }
-  assert.equal((await clearClawDefault(settings, 'standard')).cleared, false)
-  assert.equal((await clearClawDefault(settings, 'wa-ws-a')).cleared, true)
-  assert.deepEqual(ops, [{ ns: 'agent-presets', list: [{ op: 'unset', path: ['default'] }] }])
+  const settings = { async mutate(ns, list, rev) { ops.push({ ns, list, rev }) } }
+  assert.equal((await clearSelectedClawDefault(settings, 'standard')).cleared, false)
+  assert.equal((await clearSelectedClawDefault(settings, 'wa-ws-a', 3)).cleared, true)
+  assert.equal((await clearClawDefault(settings, 'wa-ws-b')).cleared, true)
+  assert.deepEqual(ops, [
+    { ns: 'agent-preset-registry', list: [{ op: 'unset', path: ['selectedDefault'] }], rev: 3 },
+    { ns: 'agent-preset-registry', list: [{ op: 'unset', path: ['selectedDefault'] }], rev: undefined },
+  ])
 })
 
 test('ensureGeneratedPreset copies template then workspace preset', async () => {
@@ -269,12 +274,21 @@ test('syncBindings refreshes existing claw agents and does not invent new ones',
   const twice = syncBindings(once.registry, workspaces, 't2')
   assert.equal(once.created.length, 0)
   assert.equal(once.changed, true)
-  assert.equal(twice.changed, false)
-  const listed = listProjected(twice.registry, workspaces)
-  assert.equal(listed.agents[0].title, 'One')
-  assert.equal(listed.agents[0].sessionCount, 1)
-  assert.deepEqual(listed.agents[0].sessionIds, ['s1'])
-  assert.equal(listed.agents[0].declared.enforced, false)
+  const listedUnbound = listProjected(twice.registry, workspaces)
+  assert.equal(listedUnbound.agents[0].title, 'One')
+  assert.equal(listedUnbound.agents[0].sessionCount, 0)
+  assert.deepEqual(listedUnbound.agents[0].sessionIds, [])
+  assert.equal(listedUnbound.agents[0].declared.enforced, false)
+
+  const withBound = bindSession(twice.registry, {
+    sessionId: 's1',
+    agentId: bound.agent.agentId,
+    workspaceId: 'ws',
+    presetId: 'wa-one',
+  })
+  const listedBound = listProjected(withBound.registry, workspaces)
+  assert.equal(listedBound.agents[0].sessionCount, 1)
+  assert.deepEqual(listedBound.agents[0].sessionIds, ['s1'])
 })
 
 test('explainAgent finds by workspace id and path', () => {

@@ -1,6 +1,6 @@
 import { CLAW_MARK_OPEN } from './registry-marks.mjs'
 
-export const ATTR = 'data-dsh-agent-registry'
+export const ATTR = 'data-dsh-claw-registry'
 
 export const CSS = [
   'body[' + ATTR + '] .dar-page{display:flex;flex-direction:column;gap:12px;max-width:800px;color:var(--dsw-alias-label-primary)}',
@@ -171,5 +171,9 @@ export const CSS = [
   'body[' + ATTR + '] .dar-dialog-body{padding:8px 16px;color:var(--dsw-alias-label-secondary);font-size:13px;line-height:1.6}',
   'body[' + ATTR + '] .dar-dialog-actions{display:flex;justify-content:flex-end;gap:8px;padding:10px 16px 14px}',
   'body[' + ATTR + '] .dar-input{width:100%;box-sizing:border-box;padding:6px 10px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:transparent;color:var(--dsw-alias-label-primary);font-size:13px}',
+  'body[' + ATTR + '] .dar-claw-agent{display:flex;flex-direction:column;gap:6px;padding:8px 0;border-bottom:1px solid var(--dsw-alias-border-l2,rgba(127,127,127,.2))}',
+  'body[' + ATTR + '] .dar-session-list{list-style:none;margin:0;padding:0 0 0 24px;display:flex;flex-direction:column;gap:4px}',
+  'body[' + ATTR + '] .dar-btn-link{border:0;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;font:inherit;font-size:12px;padding:2px 0;text-align:left}',
+  'body[' + ATTR + '] .dar-btn-link:hover{color:var(--dsw-alias-label-primary)}',
   '@media (prefers-reduced-motion:reduce){body[' + ATTR + '] *{transition:none}}',
 ].join('\n')

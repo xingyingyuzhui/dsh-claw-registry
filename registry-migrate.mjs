@@ -1,8 +1,11 @@
 import { mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
+import { readFile, writeFile } from 'node:fs/promises'
 import { spawnSync } from 'node:child_process'
 import { join } from 'node:path'
 import { constants, zstdCompressSync, zstdDecompressSync } from 'node:zlib'
 import { isClawPresetId } from './registry-presets.mjs'
+import { registryFile, saveRegistry } from './registry-store.mjs'
+import { sameRoot } from './registry-logic.mjs'
 
 export const MIGRATE_VERSION = 2
 export const QUARANTINE_DIR = 'workspace-agents/quarantine-presets'
@@ -68,7 +71,7 @@ export function rewriteSessionLog(text, preset = 'standard') {
     type: 'agent-preset/selected',
     seq: lastSeq + 1,
     time: Date.now(),
-    data: { agentPreset: preset, source: 'dsh-agent-registry-migrate' },
+    data: { agentPreset: preset, source: 'dsh-claw-registry-migrate' },
   })
   if (next.length && next[next.length - 1] === '') next[next.length - 1] = event
   else next.push(event)
@@ -268,3 +271,108 @@ export function migrateClawLegacy(home) {
   writeMarker(home, result)
   return result
 }
+
+export async function migrateRegistryV1ToV2(home, registry, sessionController, workspaces = []) {
+  if (registry && Number(registry.version) >= 2 && registry.sessionBindings) {
+    return { registry, migrated: false }
+  }
+
+  const file = registryFile(home)
+  const now = new Date().toISOString()
+  const backupPath = file + '.bak-v1-' + Date.now()
+  try {
+    const raw = await readFile(file, 'utf8')
+    await writeFile(backupPath, raw, 'utf8')
+  } catch {
+    // If file doesn't exist yet, no backup needed
+  }
+
+  const byId = new Map()
+  for (const ws of workspaces || []) {
+    if (ws && (ws.id != null || ws.workspaceId != null)) {
+      byId.set(String(ws.id != null ? ws.id : ws.workspaceId), ws)
+    }
+  }
+
+  const sessionBindings = {}
+  const repairQueue = {}
+
+  for (const agent of Object.values(registry.agents || {})) {
+    if (agent.status !== 'active') continue
+    const ws = byId.get(String(agent.workspaceId))
+    const sessionIds = ws && Array.isArray(ws.sessionIds) ? ws.sessionIds : []
+
+    for (const sid of sessionIds) {
+      if (!sid) continue
+      let meta = null
+      let inspectError = null
+
+      if (sessionController && typeof sessionController.inspect === 'function') {
+        try {
+          meta = await sessionController.inspect(sid)
+        } catch (err) {
+          inspectError = err
+        }
+      }
+
+      if (meta) {
+        const cwdMatch = sameRoot(meta.cwd, agent.canonicalRoot)
+        const presetMatch = meta.agentPreset === agent.dshPreset
+
+        if (cwdMatch && presetMatch) {
+          sessionBindings[sid] = {
+            sessionId: sid,
+            agentId: agent.agentId,
+            workspaceId: agent.workspaceId,
+            presetId: agent.dshPreset,
+            state: 'ready',
+            source: 'migration',
+            createdAt: now,
+            updatedAt: now,
+          }
+        } else {
+          repairQueue[sid] = {
+            sessionId: sid,
+            workspaceId: agent.workspaceId,
+            suggestedAgentId: agent.agentId,
+            reason: !presetMatch ? 'missing-preset-evidence' : 'mismatched-cwd',
+            evidence: [
+              'workspace-membership',
+              cwdMatch ? 'cwd-match' : 'mismatched-cwd',
+              presetMatch ? 'preset-match' : 'preset-mismatch',
+            ],
+            createdAt: now,
+          }
+        }
+      } else {
+        repairQueue[sid] = {
+          sessionId: sid,
+          workspaceId: agent.workspaceId,
+          suggestedAgentId: agent.agentId,
+          reason: inspectError ? 'inspect-failed' : 'unverified_v1_session',
+          evidence: ['workspace-membership'],
+          createdAt: now,
+        }
+      }
+    }
+  }
+
+  const v2Registry = {
+    ...registry,
+    version: 2,
+    revision: Number(registry.revision) || 1,
+    sessionBindings,
+    repairQueue,
+  }
+
+  await saveRegistry(file, v2Registry)
+
+  return {
+    registry: v2Registry,
+    migrated: true,
+    backupPath,
+    boundCount: Object.keys(sessionBindings).length,
+    repairCount: Object.keys(repairQueue).length,
+  }
+}
+

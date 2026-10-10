@@ -1,4 +1,4 @@
-import { isClawPresetId, isClawPresetMenuLabel } from './registry-view.mjs'
+import { isClawPresetId, isClawPresetMenuLabel } from '../registry-view.mjs'
 
 export const SEAT_HIDE_ATTR = 'data-dar-seat-hide'
 export const ACCESS_HIDE_ATTR = 'data-dar-access-hide'

@@ -36,7 +36,7 @@ export function profileHasBundle(pkg, id) {
   return bundles.includes(id)
 }
 
-export function shouldApplyLeaveBehind(pkg, id = 'dsh-agent-registry') {
+export function shouldApplyLeaveBehind(pkg, id = 'dsh-claw-registry') {
   if (!pkg || !pkg.dsh || !pkg.dsh.profile || !Array.isArray(pkg.dsh.profile.bundles)) return false
   return !pkg.dsh.profile.bundles.includes(id)
 }

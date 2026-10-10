@@ -16,7 +16,7 @@ import {
   normalizePolicy,
   optionAllowed,
   toggleTool,
-} from '../dsh-agent-policy/policy-schema.mjs'
+} from 'dsh-claw-policy/schema'
 
 export {
   AGENT_PRESET_IDS,
@@ -125,13 +125,25 @@ export async function ensureOpenPersona(presets, io) {
   return { changed }
 }
 
-export async function clearClawDefault(settings, defaultId) {
-  if (!isClawPresetId(defaultId)) return { cleared: false }
+/**
+ * Unset volatile selectedDefault when it points at a Claw wa-* / template preset.
+ * Namespace is agent-preset-registry (0.2+); path is selectedDefault only.
+ */
+export async function clearSelectedClawDefault(settings, selectedDefault, expectedRevision) {
+  if (!isClawPresetId(selectedDefault)) return { cleared: false }
   if (settings == null || typeof settings.mutate !== 'function') {
     return { cleared: false, skipped: true }
   }
-  await settings.mutate('agent-presets', [{ op: 'unset', path: ['default'] }])
+  const args = expectedRevision === undefined
+    ? ['agent-preset-registry', [{ op: 'unset', path: ['selectedDefault'] }]]
+    : ['agent-preset-registry', [{ op: 'unset', path: ['selectedDefault'] }], expectedRevision]
+  await settings.mutate(...args)
   return { cleared: true }
+}
+
+/** @deprecated Prefer clearSelectedClawDefault */
+export async function clearClawDefault(settings, selectedDefault, expectedRevision) {
+  return clearSelectedClawDefault(settings, selectedDefault, expectedRevision)
 }
 
 export function isIsolatedMinimalClone(text) {
