@@ -1,6 +1,6 @@
 {
   "name": "dsh-claw-registry",
-  "version": "0.3.0-rc.1",
+  "version": "0.3.0-rc.2",
   "description": "Claw agent registry for DeepSeek Harness: create agents, supply their wa-* agent presets, start and bind Claw sessions. Does not gate tools. Claw Agent 登记：新建 Agent、供给 wa-* 预设、开会话并绑定，不拦截工具。",
   "keywords": [
     "dsh",
@@ -76,9 +76,9 @@
     }
   },
   "dependencies": {
-    "dsh-claw-core": "0.3.0-rc.1",
-    "dsh-claw-policy": "0.3.0-rc.1",
-    "dsh-claw-observability": "0.3.0-rc.1",
+    "dsh-claw-core": "0.3.0-rc.2",
+    "dsh-claw-policy": "0.3.0-rc.2",
+    "dsh-claw-observability": "0.3.0-rc.2",
     "js-yaml": "^4.1.0"
   }
 }
