@@ -50,6 +50,8 @@ export const CSS = [
   'body[' + ATTR + '] .dar-tab[data-active="true"]::after{position:absolute;right:0;bottom:-1px;left:0;height:2px;border-radius:2px 2px 0 0;background:var(--dsw-alias-label-primary);content:""}',
   'body[' + ATTR + '] .dar-tab:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:2px;border-radius:2px}',
   'body[' + ATTR + '] .dar-card{border:1px solid var(--dsw-alias-border-l2);border-radius:10px;background:transparent;overflow:hidden}',
+  'body[' + ATTR + '] .dar-compat{display:flex;flex-direction:column;gap:8px;max-width:800px;margin-bottom:12px;padding:12px}',
+  'body[' + ATTR + '] .dar-compat-browser{max-height:320px;overflow:auto}',
   'body[' + ATTR + '] .dar-card:has(.dar-ms),body[' + ATTR + '] .dar-card:has(.dar-pick-wrap){overflow:visible}',
   'body[' + ATTR + '] .dar-panel-body{padding:14px;display:flex;flex-direction:column;gap:10px}',
   'body[' + ATTR + '] .dar-panel-title{margin:0;font-size:15px;font-weight:600;line-height:22px}',

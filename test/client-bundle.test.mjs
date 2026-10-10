@@ -23,6 +23,7 @@ const ACTIVE_SOURCES = [
   'registry-bindings.mjs',
   'registry-claw-browser.mjs',
   'registry-browser-mode.mjs',
+  'registry-compat-panel.mjs',
   'registry-session-mark.mjs',
   'registry-client-apply.mjs',
 ]
@@ -44,7 +45,7 @@ test('generated client keeps the factory contract', () => {
   assert.equal(check.status, 0, check.stderr)
   assert.match(src, /Do not edit by hand/)
   assert.match(src, /id: 'dsh-claw-registry'/)
-  assert.match(src, /inject = \['slots', 'locale', 'sessions', 'uiWorkspace', 'remote', 'workspaces'\]/)
+  assert.match(src, /inject = \['slots', 'locale', 'sessions', 'uiWorkspace', 'remote', 'remote.session', 'workspaces'\]/)
   assert.match(src, /return module\.exports/)
   assert.match(src, /claw区agent模板/)
   assert.doesNotMatch(src, /sidebar\.panellist/)
@@ -53,6 +54,8 @@ test('generated client keeps the factory contract', () => {
   assert.match(src, /registerBrowserMode/)
   assert.match(src, /createClaimsStore/)
   assert.match(src, /createClawBrowser/)
+  assert.match(src, /createCompatSettingsPage/)
+  assert.match(src, /hasBrowserModeSeam/)
   assert.match(src, /sidebar\.session\.row\.leading/)
   assert.match(src, /settings\.section/)
   assert.match(src, /createClawSession/)

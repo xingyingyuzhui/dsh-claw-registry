@@ -28,6 +28,7 @@ const parts = [
   'registry-bindings.mjs',
   'registry-claw-browser.mjs',
   'registry-browser-mode.mjs',
+  'registry-compat-panel.mjs',
   'registry-session-mark.mjs',
   'registry-client-apply.mjs',
   ].map((file) => stripModule(readFileSync(join(root, file), 'utf8'))),
@@ -43,7 +44,7 @@ const body = `window.__ModuleLoader__.load({
     var exports = module.exports
 
     var name = 'dsh-claw-registry'
-    var inject = ['slots', 'locale', 'sessions', 'uiWorkspace', 'remote', 'workspaces']
+    var inject = ['slots', 'locale', 'sessions', 'uiWorkspace', 'remote', 'remote.session', 'workspaces']
 
 ${parts.join('\n')}
 

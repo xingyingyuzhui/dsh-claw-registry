@@ -28,6 +28,7 @@ const EXPECTED_PATHS = [
   '/api/dsh-claw/registry/archive',
   '/api/dsh-claw/registry/rename',
   '/api/dsh-claw/registry/create',
+  '/api/dsh-claw/registry/preset/ensure',
   '/api/dsh-claw/registry/diag',
   '/api/dsh-claw/registry/policy',
   '/api/dsh-claw/registry/skills',
@@ -60,7 +61,6 @@ test('apply registers Connection Fetch routes and disposes them', async () => {
     },
   }
   apply(ctx)
-  assert.equal(routes.length, 16)
   assert.deepEqual(routes.map((row) => row.path), EXPECTED_PATHS)
   for (const row of routes) {
     assert.deepEqual(row.methods, ['POST'])
@@ -176,6 +176,56 @@ test('create skips a non-empty orphan directory instead of overwriting it', asyn
   assert.equal(payload.ok, true)
   assert.equal(payload.agent.slug, 'demo-2')
   assert.equal(await readFile(join(orphan, 'SOUL.md'), 'utf8'), 'keep custom soul\n')
+})
+
+test('create registers the agent wa-* preset; preset/ensure reports readiness without fallback', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dar-home-preset-'))
+  _internal.setDshHome(dir)
+  const { connection, routes } = fakeConnection()
+  const registered = []
+  let refuse = false
+  const ctx = {
+    workspaceRegistry: {
+      list() { return [] },
+      async create(path, title) { return { id: 'ws-p', path, title } },
+    },
+    agentPresets: {
+      defaultId: 'standard',
+      async list() { return [{ id: 'standard' }] },
+      async readDocument(id) { return { agentPreset: id, content: "- id: persona\n  name: '@deepseek-ai/dsh-persona'\n" } },
+      async register(def) {
+        if (refuse) throw new Error('mount failed')
+        registered.push(def)
+        return async () => {}
+      },
+    },
+    settings: { async mutate() {} },
+    connection,
+    effect() {},
+  }
+  apply(ctx)
+  const call = (path, body) => routes.find((row) => row.path === path).fetch(new Request('dsh-app://host' + path, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  }))
+
+  const created = await (await call('/api/dsh-claw/registry/create', { name: 'Lab' })).json()
+  assert.equal(created.ok, true)
+  assert.equal(created.presetError, undefined)
+  assert.deepEqual(registered.map((def) => def.id), [created.agent.dshPreset])
+  assert.equal(registered[0].plugins[0].name, '@deepseek-ai/dsh-persona')
+
+  const ready = await (await call('/api/dsh-claw/registry/preset/ensure', { agentId: created.agent.agentId })).json()
+  assert.equal(ready.presetId, created.agent.dshPreset)
+  assert.equal(registered.length, 1)
+
+  refuse = true
+  const second = await (await call('/api/dsh-claw/registry/create', { name: 'Lab Two' })).json()
+  assert.equal(second.ok, true)
+  assert.match(second.presetError, /mount failed/)
+  const res = await call('/api/dsh-claw/registry/preset/ensure', { agentId: second.agent.agentId })
+  assert.equal(res.status, 409)
+  assert.equal((await res.json()).code, 'REGISTRY_PRESET_UNAVAILABLE')
 })
 
 test('session bind, state transition, and CAS revision handling', async () => {

@@ -9,7 +9,8 @@ import { agentForSession } from './registry-view.mjs'
 import { createSettingsPage, registerSettings } from './registry-settings.mjs'
 import { createTemplatePage } from './registry-template.mjs'
 import { createNavigation } from './registry-navigation.mjs'
-import { registerClawBrowserMode } from './registry-browser-mode.mjs'
+import { hasBrowserModeSeam, registerClawBrowserMode } from './registry-browser-mode.mjs'
+import { createCompatSettingsPage } from './registry-compat-panel.mjs'
 import { registerSessionMark } from './registry-session-mark.mjs'
 import { formatObserveFail, newTraceId } from './registry-observe.mjs'
 
@@ -83,7 +84,6 @@ export function apply(ctx) {
   try { ReactDOM = require('react-dom') } catch { /* optional */ }
   const Page = createSettingsPage(React, t, post, toast, subscribeLocale, ReactDOM)
   const TemplatePage = createTemplatePage(React, t, post, toast, subscribeLocale, ReactDOM)
-  const stopSettings = registerSettings(ctx, React, t, Page, TemplatePage)
 
   let projected = null
   const projectedListeners = new Set()
@@ -162,6 +162,8 @@ export function apply(ctx) {
     },
   }
 
+  const SettingsPage = hasBrowserModeSeam(ctx) ? Page : createCompatSettingsPage(React, shared, Page)
+  const stopSettings = registerSettings(ctx, React, t, SettingsPage, TemplatePage)
   const stopBrowserMode = registerClawBrowserMode(ctx, React, shared)
   const stopMark = registerSessionMark(ctx, React, shared)
 

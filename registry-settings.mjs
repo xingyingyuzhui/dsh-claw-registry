@@ -66,7 +66,9 @@ function coreSpec(key, daily) {
 }
 
 export function createSettingsPage(React, t, post, toast, subscribeLocale, ReactDOM) {
-  return function RegistryPage() {
+  return function RegistryPage(props) {
+    const refreshKey = props && props.refreshKey
+    const compatMode = Boolean(props && props.compatMode)
     const el = React.createElement
     function svgIcon(className, d) {
       return el('svg', {
@@ -127,7 +129,7 @@ export function createSettingsPage(React, t, post, toast, subscribeLocale, React
       })
     }, [])
 
-    React.useEffect(() => { load() }, [load])
+    React.useEffect(() => { load() }, [load, refreshKey])
 
     const choices = selectableAgents(data, { main: t('mainOption'), archived: t('statusArchived') })
     const current = choices.find((row) => row.agentId === selected) || choices[0]
@@ -1024,7 +1026,7 @@ export function createSettingsPage(React, t, post, toast, subscribeLocale, React
         ),
         el('div', { className: 'dar-card', role: 'tabpanel' },
           !current
-            ? el('p', { className: 'dar-empty' }, t('empty'))
+            ? el('p', { className: 'dar-empty' }, t(compatMode ? 'emptyCompat' : 'empty'))
             : panel,
         ),
       ),

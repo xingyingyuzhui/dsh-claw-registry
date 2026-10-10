@@ -13,6 +13,7 @@ import {
 } from './registry-store.mjs'
 import { defaultsFile, loadDefaultsSync, readTemplateSeedsSync, saveDefaults, writeTemplateSeed } from 'dsh-claw-policy/store'
 import { clearSelectedClawDefault, normalizePolicy } from './registry-presets.mjs'
+import { createPresetSupply } from './registry-preset-supply.mjs'
 import {
   archiveAgent,
   explainAgent,
@@ -140,20 +141,12 @@ async function guardClawDefault(ctx) {
   }
 }
 
-async function removePreset(ctx, id) {
-  const presets = ctx.agentPresets
-  if (presets == null || typeof presets.remove !== 'function' || !id) return
-  try {
-    await presets.remove(id)
-  } catch { /* already gone or shipped */ }
-}
-
 async function provisionPresets(ctx, registry) {
   await guardClawDefault(ctx)
   return registry
 }
 
-async function readSynced(ctx) {
+async function readSynced(ctx, supply) {
   const file = registryFile(dshHome)
   let loaded = await loadRegistry(file)
   if (loaded.version < 2 || !loaded.sessionBindings) {
@@ -164,7 +157,7 @@ async function readSynced(ctx) {
   }
   const purged = purgeLegacyAgents(loaded, dshHome)
   for (const agent of purged.removed) {
-    await removePreset(ctx, agent.dshPreset)
+    await supply.release(agent.dshPreset)
   }
   let workspaces = listWorkspaces(ctx)
   const synced = syncBindings(purged.registry, workspaces)
@@ -185,10 +178,13 @@ async function readSynced(ctx) {
 export function apply(ctx) {
   if (_internal.migrateOnApply) runLegacyMigrate(ctx)
 
+  const supply = createPresetSupply(ctx.agentPresets)
+  ctx.effect(() => () => { void supply.disposeAll() })
+
   registerJsonRoute(ctx, {
     path: '/api/dsh-claw/registry/list',
     handle: async (_body, request) => runWithTrace(request, async () => {
-      const { registry, workspaces } = await readSynced(ctx)
+      const { registry, workspaces } = await readSynced(ctx, supply)
       const projected = listProjected(registry, workspaces, dshHome)
       if (projected.main) projected.main.files = identityPaths(dshHome, 'main', projected.main)
       return withTrace({
@@ -208,7 +204,7 @@ export function apply(ctx) {
   registerJsonRoute(ctx, {
     path: '/api/dsh-claw/registry/explain',
     handle: async (body, request) => runWithTrace(request, async () => {
-      const { registry, workspaces } = await readSynced(ctx)
+      const { registry, workspaces } = await readSynced(ctx, supply)
       const row = explainAgent(registry, workspaces, body || {})
       if (!row) throw httpError(404, 'agent not found')
       return withTrace({ agent: row })
@@ -349,9 +345,38 @@ export function apply(ctx) {
         })
         throw httpError(500, 'registry save failed', CODES.REGISTRY_SAVE_FAILED)
       }
+      op.stage('register_preset')
+      try {
+        await supply.ensure(agent)
+      } catch (error) {
+        op.degraded(CODES.REGISTRY_PRESET_UNAVAILABLE, { agentId: agent.agentId, presetId: agent.dshPreset, reason: error && error.message })
+        return withTrace({ agent, clawHome: clawHome(dshHome), presetError: error && error.message })
+      }
       if (skippedOrphan) op.success({ agentId: agent.agentId, slug, code: CODES.REGISTRY_ORPHAN_SLUG_SKIPPED })
       else op.success({ agentId: agent.agentId, slug })
       return withTrace({ agent, clawHome: clawHome(dshHome) })
+    }),
+  })
+
+  registerJsonRoute(ctx, {
+    path: '/api/dsh-claw/registry/preset/ensure',
+    handle: async (body, request) => runWithTrace(request, async () => {
+      const agentId = body && body.agentId
+      if (typeof agentId !== 'string' || !agentId.startsWith('wa_')) {
+        throw httpError(400, 'invalid agent id')
+      }
+      const loaded = await loadRegistry(registryFile(dshHome))
+      const agent = loaded.agents[agentId]
+      if (!agent) throw httpError(404, 'agent not found', CODES.REGISTRY_AGENT_NOT_FOUND)
+      const op = operation({ plugin: 'dsh-claw-registry', feature: 'agent', operation: 'ensure_preset', agentId })
+      try {
+        const presetId = await supply.ensure(agent)
+        return withTrace({ presetId })
+      } catch (error) {
+        op.start()
+        op.fail(CODES.REGISTRY_PRESET_UNAVAILABLE, error, { presetId: agent.dshPreset })
+        throw httpError(409, 'preset unavailable: ' + (error && error.message ? error.message : error), CODES.REGISTRY_PRESET_UNAVAILABLE)
+      }
     }),
   })
 
@@ -731,4 +756,24 @@ export function apply(ctx) {
   })
 
   void guardClawDefault(ctx)
+  void registerKnownPresets(ctx, supply)
+}
+
+async function registerKnownPresets(ctx, supply) {
+  let agents = []
+  try {
+    agents = Object.values(loadRegistrySync(registryFile(dshHome)).agents || {})
+  } catch { return }
+  const failed = await supply.ensureAll(agents)
+  if (failed.length === 0) return
+  const op = operation({ plugin: 'dsh-claw-registry', feature: 'agent', operation: 'register_presets' })
+  op.start()
+  op.degraded(CODES.REGISTRY_PRESET_UNAVAILABLE, {
+    failed: failed.length,
+    presets: failed.map((row) => row.presetId),
+    reason: failed[0].error && failed[0].error.message,
+  })
+  if (ctx.logger && typeof ctx.logger.warn === 'function') {
+    ctx.logger.warn('dsh-claw-registry: ' + failed.length + ' Claw preset(s) unavailable: ' + (failed[0].error && failed[0].error.message))
+  }
 }

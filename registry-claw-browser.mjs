@@ -122,11 +122,15 @@ export function createClawBrowser(React, api) {
           post: api.post,
           expectedRevision: projected && projected.revision,
           loadProjected: api.loadProjected,
+          requireAgentPresetReady: (target) => api.post('/api/dsh-claw/registry/preset/ensure', { agentId: target.agentId }),
         })
+        if (typeof props.onNavigate === 'function') props.onNavigate()
       } catch (err) {
         const msg = err && err.name === 'ClawPartialCreateError'
           ? t('sessionPartialCreate')
-          : String((err && err.message) || t('sessionCreateFailed'))
+          : err && err.code === 'REGISTRY_PRESET_UNAVAILABLE'
+            ? t('presetUnavailable', { name: agent.title || agent.slug || agent.agentId })
+            : String((err && err.message) || t('sessionCreateFailed'))
         api.toast(msg)
       } finally {
         setBusyId('')
@@ -490,6 +494,7 @@ export function createClawBrowser(React, api) {
                       type: 'button',
                       className: 'dar-claw-icon-btn',
                       title: t('clawAddSession', { name: title }),
+                      'aria-label': t('clawAddSession', { name: title }),
                       disabled: isBusy || !agent.workspaceId,
                       style: { fontSize: '15px', lineHeight: 1 },
                       onClick: () => handleStartSession(agent),
@@ -515,7 +520,10 @@ export function createClawBrowser(React, api) {
                         return el('div', {
                           key: sid,
                           className: 'dar-claw-session',
-                          onClick: () => api.nav.openSession(sid),
+                          onClick: () => {
+                            api.nav.openSession(sid)
+                            if (typeof props.onNavigate === 'function') props.onNavigate()
+                          },
                           style: {
                             display: 'flex',
                             alignItems: 'center',

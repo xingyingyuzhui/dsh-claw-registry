@@ -7,7 +7,7 @@ window.__ModuleLoader__.load({
     var exports = module.exports
 
     var name = 'dsh-claw-registry'
-    var inject = ['slots', 'locale', 'sessions', 'uiWorkspace', 'remote', 'workspaces']
+    var inject = ['slots', 'locale', 'sessions', 'uiWorkspace', 'remote', 'remote.session', 'workspaces']
 
 const POLICY_SCHEMA_VERSION = 1
 const INIT_PRESET = 'research'
@@ -576,6 +576,8 @@ const COPY = {
     deploy: '对外发布',
     dshPreset: 'DSH 预设',
     empty: '还没有 Claw Agent。在左侧 Claw区填写名字并创建。',
+    emptyCompat: '还没有 Claw Agent。在上方新建。',
+    compatNotice: '当前 DeepSeek Harness 没有侧栏分区接口，Claw区暂时放在这里：在这里新建 Agent、开会话。Claw 会话也会出现在左侧普通工作区列表里；权限、闸、人设和记忆照常生效。',
     mainTitle: 'Main Agent',
     mainHint: '控制面：编排与审计。默认可看各 Agent 的脱敏摘要。',
     agentId: 'Agent',
@@ -627,7 +629,7 @@ const COPY = {
     clawToggle: '展开或收起 {name}',
     zoneSwitch: '切换工作区与 Claw区',
     zoneClaw: 'Claw Agent',
-    incompatibleDsh: '当前 DSH 版本不支持 Claw 工作区分区，请升级 DeepSeek Harness。',
+    incompatibleDsh: '当前 DSH 没有侧栏分区接口，Claw区改在 设置 → Claw Agent 里使用。',
     newAgent: '新建 Claw Agent',
     searchAgents: '搜索 Agent',
     repairQueueTitle: '待修复会话',
@@ -647,6 +649,7 @@ const COPY = {
     panelBusy: '处理中…',
     sessionCreateFailed: '创建会话失败',
     sessionPartialCreate: '会话已创建，但后续步骤失败',
+    presetUnavailable: '「{name}」的 Agent 预设没有装载成功，没有创建会话。到 设置 → 运行诊断 查看原因。',
   },
   en: {
     nav: 'Claw Agent',
@@ -751,6 +754,8 @@ const COPY = {
     deploy: 'Publish',
     dshPreset: 'DSH preset',
     empty: 'No Claw agents yet. Create one from the Claw sidebar.',
+    emptyCompat: 'No Claw agents yet. Create one above.',
+    compatNotice: 'This DeepSeek Harness build has no sidebar partition API, so the Claw zone lives here for now: create agents and start sessions from this panel. Claw sessions also appear in the regular workspace list; permissions, gate, identity and memory still apply.',
     mainTitle: 'Main agent',
     mainHint: 'Control plane: orchestration and audit. It may read redacted memory summaries by default.',
     agentId: 'Agent',
@@ -802,7 +807,7 @@ const COPY = {
     clawToggle: 'Expand or collapse {name}',
     zoneSwitch: 'Switch Workspaces and Claw',
     zoneClaw: 'Claw Agent',
-    incompatibleDsh: 'This DSH version does not support Claw workspace partitioning. Please upgrade DeepSeek Harness.',
+    incompatibleDsh: 'This DSH build has no sidebar partition API; use Settings → Claw Agent for the Claw zone.',
     newAgent: 'New Claw Agent',
     searchAgents: 'Search agents',
     repairQueueTitle: 'Sessions pending repair',
@@ -822,6 +827,7 @@ const COPY = {
     panelBusy: 'Working…',
     sessionCreateFailed: 'Could not create session',
     sessionPartialCreate: 'Session created, but a later step failed',
+    presetUnavailable: 'The agent preset for "{name}" failed to load, so no session was created. See Settings → Diagnostics.',
   },
 }
 
@@ -914,6 +920,8 @@ const CSS = [
   'body[' + ATTR + '] .dar-tab[data-active="true"]::after{position:absolute;right:0;bottom:-1px;left:0;height:2px;border-radius:2px 2px 0 0;background:var(--dsw-alias-label-primary);content:""}',
   'body[' + ATTR + '] .dar-tab:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:2px;border-radius:2px}',
   'body[' + ATTR + '] .dar-card{border:1px solid var(--dsw-alias-border-l2);border-radius:10px;background:transparent;overflow:hidden}',
+  'body[' + ATTR + '] .dar-compat{display:flex;flex-direction:column;gap:8px;max-width:800px;margin-bottom:12px;padding:12px}',
+  'body[' + ATTR + '] .dar-compat-browser{max-height:320px;overflow:auto}',
   'body[' + ATTR + '] .dar-card:has(.dar-ms),body[' + ATTR + '] .dar-card:has(.dar-pick-wrap){overflow:visible}',
   'body[' + ATTR + '] .dar-panel-body{padding:14px;display:flex;flex-direction:column;gap:10px}',
   'body[' + ATTR + '] .dar-panel-title{margin:0;font-size:15px;font-weight:600;line-height:22px}',
@@ -1046,9 +1054,6 @@ const CSS = [
 
 const SHIPPED_PRESET_IDS = ['standard', 'code', 'minimal', 'cordis']
 const TEMPLATE_ID = 'wa-template'
-const TEMPLATE_NAME = 'claw区agent模板'
-const TEMPLATE_LEGACY_NAMES = ['工作区 Agent 模板', '工作区agent模板']
-const TEMPLATE_SOURCE_CANDIDATES = ['standard', 'code']
 
 function presetIdForWorkspace(workspaceId) {
   return 'wa-' + String(workspaceId)
@@ -1065,74 +1070,6 @@ function isClawPresetId(id) {
   return id.startsWith('wa-')
 }
 
-function fallbackMissingPreset(id, liveIds, defaultId = 'standard') {
-  if (id == null || id === '') return id
-  const live = liveIds instanceof Set ? liveIds : new Set(liveIds || [])
-  if (live.has(id)) return id
-  if (isClawPresetId(id)) return defaultId || 'standard'
-  return id
-}
-
-function aliasClawPresetId(id, defaultId = 'standard') {
-  if (!isClawPresetId(id)) return id
-  const fallback = defaultId || 'standard'
-  return isClawPresetId(fallback) ? 'standard' : fallback
-}
-
-function rewriteTemplatePresetYaml(text, name) {
-  const line = 'name: ' + name
-  if (typeof text !== 'string' || text === '') return line + '\n'
-  if (/^name:\s*.+$/m.test(text)) return text.replace(/^name:\s*.+$/m, line)
-  return line + '\n' + text
-}
-
-function siblingFile(path, name) {
-  const raw = String(path || '')
-  const dir = raw.replace(/[/\\][^/\\]+$/, '')
-  if (!dir || dir === raw) return String(name || '')
-  const sep = raw.includes('\\') ? '\\' : '/'
-  return dir + sep + String(name || '')
-}
-
-async function ensureTemplateNamed(presets, io) {
-  const list = await presets.list()
-  const template = list.find((row) => row && row.id === TEMPLATE_ID)
-  if (template == null) return { changed: false }
-  if (template.name === TEMPLATE_NAME) return { changed: false }
-  if (template.path == null || io == null || typeof io.readFile !== 'function') {
-    return { changed: false }
-  }
-  const file = siblingFile(template.path, 'preset.yml')
-  const text = await io.readFile(file, 'utf8')
-  const next = rewriteTemplatePresetYaml(text, TEMPLATE_NAME)
-  if (next === text) return { changed: false }
-  await io.writeFile(file, next)
-  return { changed: true, file }
-}
-
-function openPersonaYaml(text) {
-  if (typeof text !== 'string' || text === '') return text
-  return text.replace(/^(\s*)complete:\s*true\s*$/m, '$1complete: false')
-}
-
-async function ensureOpenPersona(presets, io) {
-  if (presets == null || typeof presets.list !== 'function' || io == null) return { changed: 0 }
-  const list = await presets.list()
-  let changed = 0
-  for (const row of list) {
-    if (!row || !isClawPresetId(row.id) || !row.path) continue
-    try {
-      const text = await io.readFile(row.path, 'utf8')
-      const next = openPersonaYaml(text)
-      if (next !== text) {
-        await io.writeFile(row.path, next)
-        changed += 1
-      }
-    } catch { /* missing composition */ }
-  }
-  return { changed }
-}
-
 /**
  * Unset volatile selectedDefault when it points at a Claw wa-* / template preset.
  * Namespace is agent-preset-registry (0.2+); path is selectedDefault only.
@@ -1147,64 +1084,6 @@ async function clearSelectedClawDefault(settings, selectedDefault, expectedRevis
     : ['agent-preset-registry', [{ op: 'unset', path: ['selectedDefault'] }], expectedRevision]
   await settings.mutate(...args)
   return { cleared: true }
-}
-
-/** @deprecated Prefer clearSelectedClawDefault */
-async function clearClawDefault(settings, selectedDefault, expectedRevision) {
-  return clearSelectedClawDefault(settings, selectedDefault, expectedRevision)
-}
-
-function isIsolatedMinimalClone(text) {
-  const src = String(text || '')
-  return src.includes('dsh-tool-bash-persistent') || src.includes('dsh-tool-str-replace-editor')
-}
-
-async function rewriteIsolatedMinimalClones(presets, io) {
-  if (presets == null || typeof presets.list !== 'function' || io == null) return { repaired: [] }
-  const list = await presets.list()
-  const source = list.find((row) => row && TEMPLATE_SOURCE_CANDIDATES.includes(row.id) && row.path)
-  if (!source) return { repaired: [] }
-  let body = ''
-  try {
-    body = await io.readFile(source.path, 'utf8')
-  } catch {
-    return { repaired: [] }
-  }
-  if (!body) return { repaired: [] }
-  const repaired = []
-  for (const row of list) {
-    if (!row || !isClawPresetId(row.id) || !row.path) continue
-    let text = ''
-    try {
-      text = await io.readFile(row.path, 'utf8')
-    } catch {
-      continue
-    }
-    if (!isIsolatedMinimalClone(text) || text === body) continue
-    await io.writeFile(row.path, body)
-    repaired.push(row.id)
-  }
-  return { repaired }
-}
-
-async function ensureGeneratedPreset(presets, spec) {
-  const id = spec.id
-  const name = spec.name
-  if (isShippedPreset(id) || id === TEMPLATE_ID) {
-    throw new Error('refusing to overwrite a shipped or template preset')
-  }
-  const list = await presets.list()
-  const ids = new Set(list.map((row) => row.id))
-  if (!ids.has(TEMPLATE_ID)) {
-    const source = TEMPLATE_SOURCE_CANDIDATES.find((candidate) => ids.has(candidate))
-    if (!source) throw new Error('no official preset to copy as template')
-    await presets.copy(source, TEMPLATE_ID, TEMPLATE_NAME)
-    ids.add(TEMPLATE_ID)
-  }
-  if (!ids.has(id)) {
-    await presets.copy(TEMPLATE_ID, id, name || id)
-  }
-  return id
 }
 
 function normalizeModel(raw) {
@@ -1695,7 +1574,9 @@ function coreSpec(key, daily) {
 }
 
 function createSettingsPage(React, t, post, toast, subscribeLocale, ReactDOM) {
-  return function RegistryPage() {
+  return function RegistryPage(props) {
+    const refreshKey = props && props.refreshKey
+    const compatMode = Boolean(props && props.compatMode)
     const el = React.createElement
     function svgIcon(className, d) {
       return el('svg', {
@@ -1756,7 +1637,7 @@ function createSettingsPage(React, t, post, toast, subscribeLocale, ReactDOM) {
       })
     }, [])
 
-    React.useEffect(() => { load() }, [load])
+    React.useEffect(() => { load() }, [load, refreshKey])
 
     const choices = selectableAgents(data, { main: t('mainOption'), archived: t('statusArchived') })
     const current = choices.find((row) => row.agentId === selected) || choices[0]
@@ -2653,7 +2534,7 @@ function createSettingsPage(React, t, post, toast, subscribeLocale, ReactDOM) {
         ),
         el('div', { className: 'dar-card', role: 'tabpanel' },
           !current
-            ? el('p', { className: 'dar-empty' }, t('empty'))
+            ? el('p', { className: 'dar-empty' }, t(compatMode ? 'emptyCompat' : 'empty'))
             : panel,
         ),
       ),
@@ -3645,11 +3526,15 @@ function createClawBrowser(React, api) {
           post: api.post,
           expectedRevision: projected && projected.revision,
           loadProjected: api.loadProjected,
+          requireAgentPresetReady: (target) => api.post('/api/dsh-claw/registry/preset/ensure', { agentId: target.agentId }),
         })
+        if (typeof props.onNavigate === 'function') props.onNavigate()
       } catch (err) {
         const msg = err && err.name === 'ClawPartialCreateError'
           ? t('sessionPartialCreate')
-          : String((err && err.message) || t('sessionCreateFailed'))
+          : err && err.code === 'REGISTRY_PRESET_UNAVAILABLE'
+            ? t('presetUnavailable', { name: agent.title || agent.slug || agent.agentId })
+            : String((err && err.message) || t('sessionCreateFailed'))
         api.toast(msg)
       } finally {
         setBusyId('')
@@ -4013,6 +3898,7 @@ function createClawBrowser(React, api) {
                       type: 'button',
                       className: 'dar-claw-icon-btn',
                       title: t('clawAddSession', { name: title }),
+                      'aria-label': t('clawAddSession', { name: title }),
                       disabled: isBusy || !agent.workspaceId,
                       style: { fontSize: '15px', lineHeight: 1 },
                       onClick: () => handleStartSession(agent),
@@ -4038,7 +3924,10 @@ function createClawBrowser(React, api) {
                         return el('div', {
                           key: sid,
                           className: 'dar-claw-session',
-                          onClick: () => api.nav.openSession(sid),
+                          onClick: () => {
+                            api.nav.openSession(sid)
+                            if (typeof props.onNavigate === 'function') props.onNavigate()
+                          },
                           style: {
                             display: 'flex',
                             alignItems: 'center',
@@ -4210,12 +4099,17 @@ function registerIncompatibleNotice(ctx, React, t) {
   if (typeof console !== 'undefined' && console.warn) {
     console.warn('[dsh-claw-registry]', t('incompatibleDsh'))
   }
-  // Hard barrier: Do NOT register legacy global panel fallback
+  // No legacy sidebar panel / DOM fallback; the Settings compat panel is the only entry (ADR-0002).
+}
+
+/** True when ui-workspace exposes the partitioned Browser Mode seam (not in any official DSH release yet). */
+function hasBrowserModeSeam(ctx) {
+  return Boolean(ctx && ctx.uiWorkspace && typeof ctx.uiWorkspace.registerBrowserMode === 'function')
 }
 
 function registerClawBrowserMode(ctx, React, shared) {
   const t = shared.t
-  if (!ctx.uiWorkspace || typeof ctx.uiWorkspace.registerBrowserMode !== 'function') {
+  if (!hasBrowserModeSeam(ctx)) {
     registerIncompatibleNotice(ctx, React, t)
     return function () {}
   }
@@ -4243,6 +4137,30 @@ function registerClawBrowserMode(ctx, React, shared) {
   return function dispose() {
     unsubProjected()
     if (typeof stopMode === 'function') stopMode()
+  }
+}
+
+/**
+ * Settings-hosted Claw entry for DSH builds without the ui-workspace Browser Mode seam (ADR-0002).
+ * Reuses the sidebar ClawBrowser; leaving for a session closes the settings modal via the owner `close`.
+ */
+
+function createCompatSettingsPage(React, shared, Page) {
+  const ClawBrowser = createClawBrowser(React, shared)
+  return function CompatSettingsPage(props) {
+    const el = React.createElement
+    const [revision, setRevision] = React.useState(0)
+    React.useEffect(() => {
+      return shared.subscribeProjected(() => setRevision((n) => n + 1))
+    }, [])
+    const close = props && typeof props.close === 'function' ? props.close : undefined
+    return el(React.Fragment, null,
+      el('section', { className: 'dar-card dar-compat', 'data-dar-compat': '1' },
+        el('p', { className: 'dar-note', role: 'note' }, shared.t('compatNotice')),
+        el('div', { className: 'dar-compat-browser' }, el(ClawBrowser, { onNavigate: close })),
+      ),
+      el(Page, { ...props, compatMode: true, refreshKey: revision }),
+    )
   }
 }
 
@@ -4355,7 +4273,6 @@ function apply(ctx) {
   try { ReactDOM = require('react-dom') } catch { /* optional */ }
   const Page = createSettingsPage(React, t, post, toast, subscribeLocale, ReactDOM)
   const TemplatePage = createTemplatePage(React, t, post, toast, subscribeLocale, ReactDOM)
-  const stopSettings = registerSettings(ctx, React, t, Page, TemplatePage)
 
   let projected = null
   const projectedListeners = new Set()
@@ -4434,6 +4351,8 @@ function apply(ctx) {
     },
   }
 
+  const SettingsPage = hasBrowserModeSeam(ctx) ? Page : createCompatSettingsPage(React, shared, Page)
+  const stopSettings = registerSettings(ctx, React, t, SettingsPage, TemplatePage)
   const stopBrowserMode = registerClawBrowserMode(ctx, React, shared)
   const stopMark = registerSessionMark(ctx, React, shared)
 

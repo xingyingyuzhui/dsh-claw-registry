@@ -31,12 +31,17 @@ export function registerIncompatibleNotice(ctx, React, t) {
   if (typeof console !== 'undefined' && console.warn) {
     console.warn('[dsh-claw-registry]', t('incompatibleDsh'))
   }
-  // Hard barrier: Do NOT register legacy global panel fallback
+  // No legacy sidebar panel / DOM fallback; the Settings compat panel is the only entry (ADR-0002).
+}
+
+/** True when ui-workspace exposes the partitioned Browser Mode seam (not in any official DSH release yet). */
+export function hasBrowserModeSeam(ctx) {
+  return Boolean(ctx && ctx.uiWorkspace && typeof ctx.uiWorkspace.registerBrowserMode === 'function')
 }
 
 export function registerClawBrowserMode(ctx, React, shared) {
   const t = shared.t
-  if (!ctx.uiWorkspace || typeof ctx.uiWorkspace.registerBrowserMode !== 'function') {
+  if (!hasBrowserModeSeam(ctx)) {
     registerIncompatibleNotice(ctx, React, t)
     return function () {}
   }
